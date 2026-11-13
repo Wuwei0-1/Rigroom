@@ -42,6 +42,29 @@ Recorded movement from a file can go on any character. Pose → Motion → **Imp
 - The agent has the same: `list_motions` and `apply_motion` (with `from` and `to` in seconds to take a piece of a long clip).
 - Motions are stored in the browser and in your studio (`motions/`). Fingers and faces are not carried over yet.
 
+## Photoreal sets: light, surfaces, air
+
+The viewport is a preview. The render server draws the real thing, and these are what make it look real:
+
+- **Lights.** Stage → **+ Light** adds a soft panel, a spot or a bulb. Place it, pick who or what it aims at, set power (watts), size and colour. A bigger panel gives softer shadows. For interiors, turn the sun off (Project → Look → Sun power 0) and light with lamps.
+- **Materials.** A prop's Material preset becomes a full surface in the render: wood (grain), leather and velvet (padded, with soft corners), fabric, stone, brick (courses and mortar), plaster, metal, paper, glass, plastic, ceramic. **Glow** and **Neon** make a prop shine, for lampshades, screens, signs and far-off bulbs that blur into discs. Hard edges are rounded slightly, as every real edge is.
+- **Environment** (Project → Look): the surroundings that light the scene from every side: a photographed studio, interior, courtyard, city, forest, sunrise, sunset or night (1K HDR images in `assets/env`, CC0 from Poly Haven), or the soft grey default. **Turn** rotates it; **Ambient** is its strength.
+- **Floor:** matte, wood boards, concrete, tiles or carpet. **Haze** puts smoke or dust in the air, so light beams show and the distance softens.
+- **People.** Skin scatters light under its surface. Imports pick up a scan's normal and gloss maps by file name (`…_norm.jpg`, `…_gloss.jpg` next to `…_dif.jpg`).
+- **Hands and faces.** Stage → Look → Hands sets each hand of a real person: relaxed, open, grip, fist or point. Every character also has a **jaw** and **lids** control on the rig (rotate about x: about 3 to 8° for speech, 26° for a blink) that drive a real person's jaw and eyelids.
+- **Lens.** A camera key can carry an f-stop (through the agent's `set_camera`), which blurs what is nearer or farther than the target. Renders get a little bloom, grain and corner darkening; shots get motion blur.
+
+The agent has all of this: `add_light`, `place` (material, light settings), `set_lighting` (environment, floor, haze), `set_hands`, and `set_camera` with `fstop`.
+
+## Film: script to video
+
+`film/` turns a script into a film on the render server. The script, voices and results live in the studio under `film/<id>/`.
+
+1. `python3 film/script_to_lines.py SCRIPT.txt film/<id>/script.json` reads a play laid out as numbered `N. SPEAKER: line` entries with stage directions.
+2. The **Voices** workflow (inputs `film=<id>`, optional `lines=1-9`) speaks every line with [Chatterbox](https://github.com/resemble-ai/chatterbox) and writes `film/<id>/audio/NNN.mp3` and `audio.json` (lengths and loudness curves). Each character's voice comes from a reference clip, `film/<id>/voices/<Character>.wav`: record 8 to 20 seconds yourself, or let the workflow design one (the built-in voice shifted to the pitch set in `voices.json`, belonging to no real person). A speech recogniser listens to every take and bad takes are redone.
+3. `film/director.js` runs inside the app on a posed scene and keys it from the audio: jaws from loudness, blinks, who looks at whom, breathing, hand gestures, and one camera per shot with cuts on the lines.
+4. The scene goes to the render server as a job with `audio` (which lines start when); the result is an MP4 with the voices mixed in.
+
 ## Studio
 
 The studio is a private repository (by default `<this repository>-studio`, for example `Wuwei0-1/Rigroom-studio`) that holds your scenes, the people and models they use, render jobs and finished renders. Keep it private: licensed models must not be shared publicly.
@@ -87,8 +110,11 @@ src/server.js     render server: sends jobs to GitHub Actions and fetches result
 src/github.js     GitHub access: the token, the studio, commits
 src/studio.js     studio sync: saving and opening scenes and their models
 src/models.js     human models: loading, fitting, skeleton matching, browser storage
-render/           Blender render script and frame planner run by the workflow
+render/           Blender render script, surfaces and lights, and frame planner run by the workflow
+film/             script parser, voices (Chatterbox) and the film director
+assets/env/       environment light images (CC0)
 .github/workflows/render.yml   the render server itself
+.github/workflows/voices.yml   speaks a film's lines
 assets/sketch.jpg reference sketch for the booth scene
 ```
 
