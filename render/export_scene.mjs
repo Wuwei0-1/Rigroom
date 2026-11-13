@@ -22,7 +22,10 @@ if (!job.scene) { console.error('job.json has no scene'); process.exit(2); }
 const types = { '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.jpg': 'image/jpeg', '.png': 'image/png', '.wasm': 'application/wasm', '.glb': 'model/gltf-binary' };
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]);
-  const file = url.startsWith('/__studio/') ? path.join(studio, url.slice('/__studio/'.length)) : path.join(site, url === '/' ? 'index.html' : url);
+  let file = url.startsWith('/__studio/') ? path.join(studio, url.slice('/__studio/'.length)) : path.join(site, url === '/' ? 'index.html' : url);
+  // a person that was replaced by a better copy is served as that copy
+  const old = url.match(/^\/__studio\/models\/([a-f0-9]+)\.glb$/);
+  if (old && !fs.existsSync(file)) { try { const to = JSON.parse(fs.readFileSync(path.join(studio, 'models/index.json'), 'utf8'))[old[1]]?.replacedBy; if (to) file = path.join(studio, 'models', to + '.glb'); } catch (e) { /* no index */ } }
   fs.readFile(file, (err, data) => { if (err) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' }); res.end(data); });
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
