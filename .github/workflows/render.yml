@@ -141,6 +141,7 @@ jobs:
           sparse-checkout: |
             jobs/${{ env.JOB }}/job.json
             out/README.md
+            film/*/audio/
       - uses: actions/download-artifact@v4
         if: needs.render.result == 'success'
         with:
@@ -165,8 +166,29 @@ jobs:
             FILE=render.png
           else
             command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
-            ffmpeg -loglevel error -framerate "$FPS" -start_number "$F0" -i frames/frame_%04d.png \
-              -c:v libx264 -pix_fmt yuv420p -crf 18 -movflags +faststart "$OUT/shot.mp4"
+            # a film job names its spoken lines and when each starts: they are mixed in under the picture
+            python3 - "jobs/$JOB/job.json" "$FPS" > mix.txt <<'PY'
+          import json, os, sys
+          job, fps = json.load(open(sys.argv[1])), float(sys.argv[2])
+          a = job.get('audio') or {}
+          cues = [(c, 'film/%s/audio/%03d.mp3' % (a.get('film'), c['n'])) for c in a.get('cues', [])]
+          cues = [(c, p) for c, p in cues if os.path.exists(p)]
+          secs = (job['frames'][1] - job['frames'][0] + 1) / fps
+          fade = float(job.get('fade', 0) or 0)
+          vf = 'scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p' + (',fade=t=in:st=0:d=%.2f,fade=t=out:st=%.2f:d=%.2f' % (fade, max(0, secs - fade), fade) if fade else '')
+          args = []
+          if cues:
+              for c, p in cues: args += ['-i', p]
+              parts = ''.join('[%d:a]adelay=%d:all=1[a%d];' % (i + 1, round(c['t'] * 1000), i) for i, (c, p) in enumerate(cues))
+              mix = parts + ''.join('[a%d]' % i for i in range(len(cues))) + 'amix=inputs=%d:normalize=0:dropout_transition=0,apad[a]' % len(cues)
+              args += ['-filter_complex', '[0:v]%s[v];%s' % (vf, mix), '-map', '[v]', '-map', '[a]', '-c:a', 'aac', '-ac', '2', '-b:a', '160k', '-t', '%.3f' % secs]
+          else:
+              args += ['-vf', vf]
+          print('\n'.join(args))
+          PY
+            mapfile -t MIX < mix.txt
+            ffmpeg -nostdin -loglevel error -framerate "$FPS" -start_number "$F0" -i frames/frame_%04d.png "${MIX[@]}" \
+              -c:v libx264 -crf 18 -movflags +faststart "$OUT/shot.mp4"
             cp "frames/frame_$(printf %04d "$F0").png" "$OUT/poster.png"
             FILE=shot.mp4
           fi

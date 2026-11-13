@@ -10,6 +10,7 @@ Scene space conversion: app (three.js) is Y-up, Blender is Z-up: (x, y, z) -> (x
 import json
 import math
 import os
+import shutil
 import sys
 import time
 
@@ -93,37 +94,33 @@ def setup_scene(job, job_dir):
 
 
 def setup_camera(scene, job):
+    """The shot camera. It is set frame by frame (never interpolated), so a cut is a clean cut."""
     cams = {int(c['f']): c for c in job['cameras']}
+    frames = sorted(cams)
     data = bpy.data.cameras.new('Camera')
     data.sensor_fit = 'VERTICAL'
     data.sensor_height = 24.0
     cam = bpy.data.objects.new('Camera', data)
     scene.collection.objects.link(cam)
     scene.camera = cam
-    dof = job.get('dof')
-    data.dof.use_dof = bool(dof)
-    if dof:
-        data.dof.aperture_fstop = float(dof.get('fstop', 2.8))
+    dof = job.get('dof') or {}
+    offset = int(job.get('frame_offset', 0))
 
-    def place(c, frame=None):
+    def place(sc, *_):
+        f = sc.frame_current - offset
+        c = cams.get(f) or cams[min(frames, key=lambda x: abs(x - f))]
         p, t = to_blender(c['p']), to_blender(c['t'])
         cam.location = p
         cam.rotation_euler = (t - p).to_track_quat('-Z', 'Y').to_euler()
         data.lens = 12.0 / math.tan(math.radians(float(c.get('fov', 35))) / 2)
-        if dof:
+        fstop = c.get('fstop') or dof.get('fstop')   # a shot's own aperture, else the job's
+        data.dof.use_dof = bool(fstop)
+        if fstop:
+            data.dof.aperture_fstop = float(fstop)
             data.dof.focus_distance = (t - p).length
-        if frame is not None:
-            cam.keyframe_insert('location', frame=frame)
-            cam.keyframe_insert('rotation_euler', frame=frame)
-            data.keyframe_insert('lens', frame=frame)
-            if dof:
-                data.dof.keyframe_insert('focus_distance', frame=frame)
 
-    if len(cams) == 1:
-        place(next(iter(cams.values())))
-    else:
-        for f, c in sorted(cams.items()):
-            place(c, frame=f)
+    bpy.app.handlers.frame_change_pre.append(place)
+    place(scene)
     return cams
 
 
@@ -177,7 +174,15 @@ def main():
     last = f1 if last is None else min(f1, last)
     # glTF time 0 lands on Blender frame 0 when the importer runs at the job's frame rate
     offset = int(job.get('frame_offset', 0))
+    # "on twos": a job with step 2 renders every second frame and holds it, as hand-drawn animation does
+    step = max(1, int(job.get('step', 1)))
+    held = None
     for f in range(first, last + 1):
+        path = os.path.join(out_dir, 'frame_%04d.png' % f)
+        if (f - f0) % step and held:
+            shutil.copyfile(held, path)
+            continue
+        held = path
         started = time.time()
         scene.frame_set(f + offset)
         scene.render.filepath = os.path.join(out_dir, 'frame_%04d.png' % f)

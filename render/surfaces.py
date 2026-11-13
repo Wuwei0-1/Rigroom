@@ -405,13 +405,15 @@ def shade_people(scene):
                 mask = g.math('MULTIPLY', mask, g.remap(rough.links[0].from_socket, 0.6, 0.5, smooth=True))
             else:
                 g.set(rough, g.remap(mask, 0.0, 1.0, 0.8, 0.44))
-            g.set(b.inputs['Subsurface Weight'], mask)
+            g.set(b.inputs['Subsurface Weight'], g.math('MULTIPLY', mask, 0.6))
             b.subsurface_method = 'RANDOM_WALK_SKIN'
             b.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.2)
-            b.inputs['Subsurface Scale'].default_value = 0.007
+            b.inputs['Subsurface Scale'].default_value = 0.004
             b.inputs['Subsurface Anisotropy'].default_value = 0.8
-            g.set(b.inputs['Sheen Weight'], g.remap(mask, 0.0, 1.0, 0.3, 0.0))
+            # a trace of sheen softens cloth; more than that frosts hair
+            g.set(b.inputs['Sheen Weight'], g.remap(mask, 0.0, 1.0, 0.06, 0.0))
             b.inputs['Sheen Roughness'].default_value = 0.6
+            g.set(b.inputs['Sheen Tint'], base)
             done += 1
     return done
 

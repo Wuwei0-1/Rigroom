@@ -283,6 +283,12 @@ export function mapSkeleton(root) {
     map['shin_' + S] = find('shin', S, map['thigh_' + S] || map.hips);
     map['foot_' + S] = find('foot', S, map['shin_' + S] || map.hips);
   }
+  // the face, when the model has one (not required): jaw and eyelids
+  const raw = o => (o.name || '').slice(pre.length), tip = /end|tip|nub/i, shallow = list => list.sort((x, y) => depth(x) - depth(y))[0] || null;
+  if (map.head) {
+    map.jaw = shallow(pool.filter(o => /jaw/i.test(raw(o)) && !tip.test(raw(o)) && isUnder(o, map.head)));
+    for (const S of ['L', 'R']) map['lid_' + S] = shallow(pool.filter(o => /eye_?lid/i.test(raw(o)) && !/low|bot/i.test(raw(o)) && !tip.test(raw(o)) && info.get(o).side === S && isUnder(o, map.head)));
+  }
   const need = ['hips', 'spine', 'chest', 'neck', 'head', 'upperArm_L', 'forearm_L', 'hand_L', 'upperArm_R', 'forearm_R', 'hand_R', 'thigh_L', 'shin_L', 'foot_L', 'thigh_R', 'shin_R', 'foot_R'];
   const missing = need.filter(k => !map[k]);
   if (map.spine && map.spine === map.chest) { /* a one-bone spine still works: chest follows spine */ }

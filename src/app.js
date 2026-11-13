@@ -153,6 +153,9 @@ function buildMannequin(e) {
   add('chest', 'spine', [0, F.chest, 0]); blob(B.chest, [0, .1, 0], [.2, .16, .115], M.MID);
   add('neck', 'chest', [0, F.neck, 0]); seg(B.neck, [0, F.head, 0], .042, M.MID);
   add('head', 'neck', [0, F.head, 0]); blob(B.head, [0, .12, 0], [.1, .125, .11], M.MID); box(B.head, [0, .11, .105], [.03, .035, .04], M.DARK);
+  // the face: jaw opens with rotation about x (degrees, about 4 to 18 when speaking); lids close the eyes the same way (about 25)
+  add('jaw', 'head', [0, .055, .075]); box(B.jaw, [0, -.02, .02], [.05, .018, .04], M.DARK);
+  add('lids', 'head', [0, .135, .1]);
   for (const [S, sx, m] of [['L', 1, M.LEFT], ['R', -1, M.RIGHT]]) {
     add('upperArm_' + S, 'chest', [F.shoulderX * sx, F.shoulderY, 0]); seg(B['upperArm_' + S], [F.upper * sx, 0, 0], .046, m);
     add('forearm_' + S, 'upperArm_' + S, [F.upper * sx, 0, 0]); seg(B['forearm_' + S], [F.fore * sx, 0, 0], .038, m);
@@ -227,6 +230,9 @@ function attachLook(e) {
     R[k] = rot;
     entries.push({ src, dst, SrInv: src.restCQ.clone().invert(), R: rot, Tr: dst.getWorldQuaternion(new Q4()).premultiply(Einv) });
   }
+  // the face follows its controls directly: the model's jaw and eyelids turn by whatever the control turned
+  for (const [k, dsts] of [['jaw', [map.jaw]], ['lids', [map.lid_L, map.lid_R]]]) { const src = e.byName.get(k); if (!src) continue;
+    for (const dst of dsts) if (dst && !used.has(dst)) { used.add(dst); entries.push({ src, dst, SrInv: src.restCQ.clone().invert(), R: new Q4(), Tr: dst.getWorldQuaternion(new Q4()).premultiply(Einv) }); } }
   e.group.traverse(o => { if (o.userData.mq) o.visible = false; });
   const hips = e.byName.get('hips');
   e.look = { wrap, entries, hips: { dst: map.hips, restChar: P(map.hips), src: hips, srcRest: hips.restWP.clone() }, fingers: { L: findFingers(map, 'L'), R: findFingers(map, 'R') } };
@@ -518,7 +524,7 @@ function cleanTracks(e, tracks) { const out = {};
   return out; }
 function applyScene(o, reuse) {
   anim.fps = clamp(+o.fps || 24, 1, 60); anim.length = clamp(Math.round(+o.length || 48), 1, 2000); anim.loop = o.loop !== false; anim.ease = ['spline', 'ease', 'linear'].includes(o.ease) ? o.ease : 'spline';
-  camKeys.length = 0; for (const k of (Array.isArray(o.cam) ? o.cam : [])) if (k && num3(k.p) && num3(k.t) && isFinite(k.f)) camKeys.push({ f: Math.round(k.f), p: k.p.map(Number), t: k.t.map(Number), fov: clamp(+k.fov || 35, 10, 90) });
+  camKeys.length = 0; for (const k of (Array.isArray(o.cam) ? o.cam : [])) if (k && num3(k.p) && num3(k.t) && isFinite(k.f)) camKeys.push({ f: Math.round(k.f), p: k.p.map(Number), t: k.t.map(Number), fov: clamp(+k.fov || 35, 10, 90), ...(isFinite(k.fstop) && k.fstop > 0 ? { fstop: clamp(+k.fstop, .7, 32) } : {}) });
   camKeys.sort((a, b) => a.f - b.f);
   if (o.look) { for (const k of Object.keys(look)) if (typeof look[k] === 'number' && o.look[k] != null && isFinite(o.look[k])) look[k] = +o.look[k];
     look.sky = SKIES.includes(o.look.sky) ? o.look.sky : 'soft'; look.floor = o.look.floor in FLOORS ? o.look.floor : 'matte'; }
@@ -795,7 +801,7 @@ $('#lookMannequin').onclick = () => { if (!active || active.kind !== 'mannequin'
 function camAt(f) {
   if (!camKeys.length) return null; if (f <= camKeys[0].f) return camKeys[0]; const last = camKeys[camKeys.length - 1]; if (f >= last.f) return last;
   let i = 0; while (camKeys[i + 1].f <= f) i++; const a = camKeys[i], c = camKeys[i + 1]; let t = (f - a.f) / (c.f - a.f); t = t * t * (3 - 2 * t);
-  const L = (x, y) => x + (y - x) * t; return { p: a.p.map((v, k) => L(v, c.p[k])), t: a.t.map((v, k) => L(v, c.t[k])), fov: L(a.fov, c.fov) };
+  const L = (x, y) => x + (y - x) * t; return { p: a.p.map((v, k) => L(v, c.p[k])), t: a.t.map((v, k) => L(v, c.t[k])), fov: L(a.fov, c.fov), fstop: a.fstop };
 }
 function applyCam(k) { camera.position.fromArray(k.p); orbit.target.fromArray(k.t); camera.lookAt(orbit.target); if (Math.abs(camera.fov - k.fov) > 1e-3) { camera.fov = k.fov; camera.updateProjectionMatrix(); } }
 export function frameCameraToShot() { const k = camAt(frame); if (k) { applyCam(k);
@@ -909,7 +915,7 @@ export function exportGLB(opts) {
     new GLTFExporter().parse(stage, out => { back(); res(out); }, err => { back(); rej(err); }, { binary: true, maxTextureSize: 2048, animations: clip && clip.tracks.length ? [clip] : [] }); });
 }
 // the shot camera at a frame, or the free view when no camera is keyed
-export function cameraAt(f) { const k = camAt(f); return k ? { p: k.p.slice(), t: k.t.slice(), fov: k.fov } : { p: camera.position.toArray(), t: orbit.target.toArray(), fov: camera.fov }; }
+export function cameraAt(f) { const k = camAt(f); return k ? { p: k.p.slice(), t: k.t.slice(), fov: k.fov, ...(k.fstop ? { fstop: k.fstop } : {}) } : { p: camera.position.toArray(), t: orbit.target.toArray(), fov: camera.fov }; }
 export function frameAspect() { return ref.url && shotView ? ref.aspect : (camKeys.length ? (ref.url ? ref.aspect : 16 / 9) : camera.aspect); }
 $('#glbBtn').onclick = async () => { try { const buf = await exportGLB(); saveFile('rigroom-scene.glb', new Blob([buf], { type: 'model/gltf-binary' })); } catch (e) { toast('Export failed: ' + (e && e.message || e), true); } };
 $('#videoBtn').onclick = () => {
@@ -1031,10 +1037,10 @@ export const TOOLS = [
   { name: 'remove', description: 'Remove a character or prop from the stage.',
     input_schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
     execute(i) { const e = needEnt(i.name); mutate(); const n = e.name; removeEnt(e); act('removed ' + n); return { removed: n }; } },
-  { name: 'set_camera', description: 'Key the shot camera at a frame: position and target in scene space, fov in degrees. Several keys make a camera move. The user sees it in Shot view.',
-    input_schema: { type: 'object', required: ['position', 'target'], properties: { frame: { type: 'integer' }, position: A3, target: A3, fov: { type: 'number' } } },
+  { name: 'set_camera', description: 'Key the shot camera at a frame: position and target in scene space, fov in degrees. Several keys make a camera move; two keys one frame apart make a cut. fstop (optional, 1.4 to 16) blurs what is nearer or farther than the target in render-server renders: 2 for a close-up, 5.6 for a wide shot. The user sees the framing in Shot view.',
+    input_schema: { type: 'object', required: ['position', 'target'], properties: { frame: { type: 'integer' }, position: A3, target: A3, fov: { type: 'number' }, fstop: { type: 'number' } } },
     execute(i) { if (!num3(i.position) || !num3(i.target)) throw new Error('position and target must each be three numbers'); mutate();
-      const f = clamp(Math.round(+i.frame || 0), 0, anim.length), k = { f, p: i.position.map(Number), t: i.target.map(Number), fov: clamp(+i.fov || 35, 10, 90) };
+      const f = clamp(Math.round(+i.frame || 0), 0, anim.length), k = { f, p: i.position.map(Number), t: i.target.map(Number), fov: clamp(+i.fov || 35, 10, 90), ...(isFinite(i.fstop) && i.fstop > 0 ? { fstop: clamp(+i.fstop, .7, 32) } : {}) };
       const x = camKeys.findIndex(c => c.f >= f); if (x < 0) camKeys.push(k); else if (camKeys[x].f === f) camKeys[x] = k; else camKeys.splice(x, 0, k);
       wantShot = true; act('camera keyed at frame ' + f); return { camera_keys: camKeys.length }; } },
   { name: 'set_lighting', description: 'Change the overall lighting: exposure (0.2 to 2), sun angle in degrees around the scene, sun height in degrees above the horizon, sun power (0 to 3; 0 turns the sun off for interiors lit by lights), ambient (0 to 2, the strength of the environment), environment (the surroundings that light the scene: "soft" even grey, or a photographed "studio", "interior", "courtyard", "city", "forest", "sunrise", "sunset", "night"), environment_turn in degrees, floor ("matte", "wood", "concrete", "tiles", "carpet"), and haze (0 to 1: smoke or dust in the air, which makes light beams visible and softens the distance; 0.2 to 0.4 suits a bar).',
