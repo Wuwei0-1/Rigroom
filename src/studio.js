@@ -41,10 +41,10 @@ export async function saveNow(force) {
     const settle = () => { if (h === meta.hash) dirty = false; };   // unsaved edits stay marked while an offer waits
     if (!sceneNew && !libDirty) { settle(); idle(); return true; }
     try {
-      const scene = JSON.parse(text), idx = await loadIndex(), midx = await loadMotionIndex(), files = [], added = [];
+      const scene = JSON.parse(text), lib = libDirty, idx = await loadIndex(), midx = lib ? await loadMotionIndex() : {}, files = [], added = [];
       let bytes = 0, more = false;
-      // people the scene uses go first, then the rest of this browser's library
-      const used = new Set(refs(scene)), local = (await listModels()).map(m => m.hash).sort((a, b) => used.has(b) - used.has(a));
+      // people the scene uses go first, then (after an import) the rest of this browser's library
+      const used = new Set(refs(scene)), local = [...used, ...(lib ? (await listModels()).map(m => m.hash).filter(h => !used.has(h)) : [])];
       for (const hash of local) {
         if (idx[hash]) continue;
         const m = await storedModel(hash); if (!m) continue;
@@ -52,17 +52,17 @@ export async function saveNow(force) {
         files.push({ path: `models/${hash}.glb`, bytes: m.bytes }); idx[hash] = { name: m.name || 'Model', size: m.bytes.byteLength }; const rig = modelRigged(hash); if (rig != null) idx[hash].rigged = rig; added.push(idx[hash].name); bytes += m.bytes.byteLength;
       }
       const moves = [];
-      for (const m of await localMotions()) if (m.id && !midx[m.id]) { files.push({ path: `motions/${m.id}.json`, text: JSON.stringify(m) }); midx[m.id] = { name: m.name, seconds: m.seconds, frames: m.frames }; moves.push(m.name); }
+      for (const m of lib ? await localMotions() : []) if (m.id && !midx[m.id]) { files.push({ path: `motions/${m.id}.json`, text: JSON.stringify(m) }); midx[m.id] = { name: m.name, seconds: m.seconds, frames: m.frames }; moves.push(m.name); }
       if (added.length) files.push({ path: INDEX, text: JSON.stringify(idx, null, 1) });
       if (moves.length) files.push({ path: MINDEX, text: JSON.stringify(midx, null, 1) });
-      if (!files.length && !sceneNew) { libDirty = false; settle(); idle(); return true; }
+      if (!files.length && !sceneNew) { if (lib) libDirty = false; settle(); idle(); return true; }
       status('Saving to your studio…');
       const savedAt = Date.now(), by = device();
       if (sceneNew) files.push({ path: SCENE, text: JSON.stringify({ ...scene, meta: { savedAt, by } }) });
       const what = [...added, ...moves.map(n => 'motion ' + n)];
       await commitFiles(files, (sceneNew ? 'Save scene' : 'Save to library') + (what.length ? ' with ' + what.join(', ') : ''));
       if (sceneNew) { meta = { savedAt, hash: h, by }; store.set('rigroom.studio.meta', meta); }
-      libDirty = more; if (sceneNew) dirty = sceneText() !== text; else settle(); idle(); if ((dirty && !offer) || more) schedule();
+      if (lib) libDirty = more; if (sceneNew) dirty = sceneText() !== text; else settle(); idle(); if ((dirty && !offer) || more) schedule();
       return true;
     } catch (e) { index = null; mindex = null; status(explain(e), true); return false; }
     finally { saving = null; }

@@ -45,11 +45,18 @@ async function hashOf(bytes) {
   const h = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(h).slice(0, 12), b => b.toString(16).padStart(2, '0')).join('');
 }
+// what is stored, read once per visit (the rows hold whole models, so they are not re-read for every list)
+let listed = null;
+const note = (hash, name, bytes) => { if (listed) listed.set(hash, { hash, name, size: bytes.byteLength }); };
 export async function listModels() {
-  try { const rows = await idb('readonly', s => s.getAll()); return (rows || []).map(r => ({ hash: r.hash, name: r.name, size: r.bytes.byteLength })); }
-  catch (e) { return [...cache.entries()].map(([hash, m]) => ({ hash, name: m.name, size: m.bytes.byteLength })); }
+  if (!listed) {
+    try { const rows = await idb('readonly', s => s.getAll()); listed = new Map((rows || []).map(r => [r.hash, { hash: r.hash, name: r.name, size: r.bytes.byteLength }])); }
+    catch (e) { return [...cache.entries()].map(([hash, m]) => ({ hash, name: m.name, size: m.bytes.byteLength })); }
+    for (const [hash, m] of cache) note(hash, m.name, m.bytes);
+  }
+  return [...listed.values()];
 }
-export async function deleteModel(hash) { cache.delete(hash); try { await idb('readwrite', s => s.delete(hash)); } catch (e) { /* storage unavailable */ } }
+export async function deleteModel(hash) { cache.delete(hash); if (listed) listed.delete(hash); try { await idb('readwrite', s => s.delete(hash)); } catch (e) { /* storage unavailable */ } }
 export function cachedName(hash) { const m = cache.get(hash); return m ? m.name : null; }
 export function cachedModels() { return [...cache.entries()].map(([hash, m]) => ({ hash, name: m.name })); }
 
@@ -63,7 +70,7 @@ export async function preloadModels(hashes) {
     if (!hash || cache.has(hash)) continue;
     try {
       let row = null; try { row = await idb('readonly', s => s.get(hash)); } catch (e) { /* storage unavailable */ }
-      if (!row && remoteFetch) { const bytes = await remoteFetch(hash); if (bytes) { row = { hash, name: await remoteName(hash), bytes }; try { await idb('readwrite', s => s.put(row, hash)); } catch (e) { /* kept for this visit */ } } }
+      if (!row && remoteFetch) { const bytes = await remoteFetch(hash); if (bytes) { row = { hash, name: await remoteName(hash), bytes }; note(hash, row.name, bytes); try { await idb('readwrite', s => s.put(row, hash)); } catch (e) { /* kept for this visit */ } } }
       if (!row) { missing.push(hash); continue; }
       cache.set(hash, { name: row.name, bytes: row.bytes, template: await parseGLB(row.bytes) });
     } catch (e) { missing.push(hash); }
@@ -84,6 +91,7 @@ async function remoteName(hash) { try { return (nameLookup && await nameLookup(h
 /** Add a model that arrived as .glb bytes (from the studio or a tool). */
 export async function addModelBytes(hash, name, bytes) {
   if (!cache.has(hash)) cache.set(hash, { name, bytes, template: await parseGLB(bytes) });
+  note(hash, name, bytes);
   try { await idb('readwrite', s => s.put({ hash, name, bytes }, hash)); } catch (e) { /* kept for this visit */ }
 }
 /** A fresh copy of a stored model, or null if it is not loaded. */
@@ -182,6 +190,7 @@ export async function importFiles(fileList) {
   if (!meshes) { if (anim) return { hash: null, name, file: main.name, anim }; throw new Error('That file has nothing to show.'); }
   const hash = await hashOf(bytes);
   if (!cache.has(hash)) cache.set(hash, { name, bytes, template: await parseGLB(bytes) });
+  note(hash, name, bytes);
   try { await idb('readwrite', s => s.put({ hash, name, bytes }, hash)); } catch (e) { /* kept for this visit only */ }
   return { hash, name, file: main.name, anim };
 }
