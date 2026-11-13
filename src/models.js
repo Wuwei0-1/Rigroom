@@ -83,7 +83,9 @@ export function setRemoteLister(fn) { remoteList = fn; }
 /** Every model this browser or the studio has: [{ hash, name, size, here }]. */
 export async function libraryModels() {
   const out = new Map((await listModels()).map(m => [m.hash, { ...m, here: true, rigged: modelRigged(m.hash) }]));
-  if (remoteList) { try { for (const m of await remoteList()) { const o = out.get(m.hash); if (!o) out.set(m.hash, { ...m, here: false }); else if (o.rigged == null) o.rigged = m.rigged ?? null; } } catch (e) { /* offline */ } }
+  if (remoteList) { try { for (const m of await remoteList()) { const o = out.get(m.hash);
+    if (m.retired) out.delete(m.hash);   // replaced by a better copy: not offered, even if this device still holds it
+    else if (!o) out.set(m.hash, { ...m, here: false }); else if (o.rigged == null) o.rigged = m.rigged ?? null; } } catch (e) { /* offline */ } }
   return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 export function setNameLookup(fn) { nameLookup = fn; }
@@ -132,11 +134,42 @@ async function downscale(file) {
 }
 function toStandard(m) {
   if (!m || m.isMeshStandardMaterial || m.isMeshBasicMaterial) return m;
-  const s = new THREE.MeshStandardMaterial({ name: m.name, color: m.color ? m.color.clone() : new THREE.Color(1, 1, 1), map: m.map || null, normalMap: m.normalMap || null,
+  // a texture carries the colour; the file's flat colour would only darken it
+  const s = new THREE.MeshStandardMaterial({ name: m.name, color: m.color && !m.map ? m.color.clone() : new THREE.Color(1, 1, 1), map: m.map || null, normalMap: m.normalMap || null,
     alphaMap: m.alphaMap || null, transparent: !!m.transparent, opacity: m.opacity ?? 1, side: m.side, roughness: m.shininess != null ? THREE.MathUtils.clamp(1 - Math.sqrt(m.shininess / 100), 0.25, 0.95) : 0.7, metalness: 0 });
   if (m.emissiveMap) { s.emissiveMap = m.emissiveMap; s.emissive = m.emissive ? m.emissive.clone() : new THREE.Color(1, 1, 1); }
   if (s.map) s.map.colorSpace = THREE.SRGBColorSpace;
   return s;
+}
+/* Scan sets ship normal and gloss maps that the model file often does not refer to. They are matched to a
+   material by file name ("…_dif.jpg" goes with "…_norm.jpg" and "…_gloss.jpg") and attached. */
+const MAP_KIND = [['color', /[_\- .](?:dif|diff|diffuse|albedo|basecolor|base_color|color|col)$/], ['normal', /[_\- .](?:norm|normal|nrm|nor)$/], ['gloss', /[_\- .](?:gloss|glossiness)$/], ['rough', /[_\- .](?:rough|roughness)$/]];
+const mapKind = base => { const stem = base.replace(/\.[^.]+$/, ''); for (const [kind, re] of MAP_KIND) { const m = stem.match(re); if (m) return { kind, prefix: stem.slice(0, m.index) }; } return null; };
+async function roughnessFrom(url, isGloss) {
+  const img = await new THREE.ImageLoader().loadAsync(url), c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0); const d = g.getImageData(0, 0, c.width, c.height), a = d.data;
+  // glTF keeps roughness in green and metalness in blue; scan gloss maps run glossier than they look, so they are eased
+  for (let i = 0; i < a.length; i += 4) { const v = a[i + 1]; a[i] = 255; a[i + 1] = isGloss ? Math.max(51, Math.round(255 - 0.75 * v)) : v; a[i + 2] = 0; a[i + 3] = 255; }
+  g.putImageData(d, 0, 0); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace; return t;
+}
+async function attachExtraMaps(root, urls, names) {
+  const extra = new Map();   // prefix -> { normal: url, gloss: url, rough: url }
+  for (const [base, url] of urls) { const k = mapKind(base); if (k && k.kind !== 'color') { const e = extra.get(k.prefix) || {}; e[k.kind] = url; extra.set(k.prefix, e); } }
+  if (!extra.size) return;
+  const mats = new Set(); root.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) if (m) mats.add(m); });
+  const made = new Map();
+  for (const m of mats) {
+    const src = m.map && m.map.image && names.get(m.map.image.src), k = src && mapKind(src);
+    const e = (k && extra.get(k.prefix)) || (mats.size === 1 && extra.size === 1 ? [...extra.values()][0] : null); if (!e) continue;
+    const like = t => { if (m.map) { t.wrapS = m.map.wrapS; t.wrapT = m.map.wrapT; t.flipY = m.map.flipY; t.repeat.copy(m.map.repeat); t.offset.copy(m.map.offset); } t.userData.mimeType = 'image/jpeg'; t.needsUpdate = true; return t; };
+    try {
+      if (e.normal && !m.normalMap) { let t = made.get(e.normal); if (!t) { t = like(await new THREE.TextureLoader().loadAsync(e.normal)); t.colorSpace = THREE.NoColorSpace; made.set(e.normal, t); } m.normalMap = t; }
+      const ru = e.rough || e.gloss;
+      if (ru && !m.roughnessMap) { let t = made.get(ru); if (!t) { t = like(await roughnessFrom(ru, !e.rough)); made.set(ru, t); } m.roughnessMap = t; m.metalnessMap = t; m.roughness = 1; m.metalness = 0; }
+    } catch (err) { /* a map that will not load is left out */ }
+    // photographs of opaque surfaces pack far smaller as JPEG; anything see-through keeps its alpha
+    if (m.map && !m.transparent && !m.alphaMap && !m.alphaTest && (!src || /\.jpe?g$/i.test(src))) m.map.userData.mimeType = 'image/jpeg';
+  }
 }
 /**
  * Load a model from the files the user picked (a .glb, or a .gltf/.fbx with its textures). Stores it and returns
@@ -159,8 +192,8 @@ export async function importFiles(fileList) {
   }
   else {
     // resolve the textures and buffers the model refers to by file name
-    const urls = new Map();
-    for (const f of files) if (f !== main) { const blob = /\.(jpe?g|png|webp)$/i.test(f.name) ? await downscale(f) : f; urls.set(f.name.split(/[\\/]/).pop().toLowerCase(), URL.createObjectURL(blob)); }
+    const urls = new Map(), names = new Map();
+    for (const f of files) if (f !== main) { const blob = /\.(jpe?g|png|webp)$/i.test(f.name) ? await downscale(f) : f, base = f.name.split(/[\\/]/).pop().toLowerCase(), url = URL.createObjectURL(blob); urls.set(base, url); names.set(url, base); }
     let loading = 0, settle = null;
     const allLoaded = new Promise(r => { settle = r; });
     const manager = new THREE.LoadingManager(() => { loading = 0; settle(); }, undefined, () => {});
@@ -181,6 +214,7 @@ export async function importFiles(fileList) {
     root.animations = [];
     root.traverse(o => { if (o.isMesh) meshes++; });
     root.traverse(o => { if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(toStandard) : toStandard(o.material); });
+    await attachExtraMaps(root, urls, names);
     bytes = await new GLTFExporter().parseAsync(root, { binary: true, maxTextureSize: MAX_TEXTURE });
     for (const u of urls.values()) URL.revokeObjectURL(u);
     if (clips.length) anim = { root, clips };

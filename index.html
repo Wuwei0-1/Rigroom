@@ -9,8 +9,8 @@
 <title>Rigroom Animator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./src/ui.css?v=2026.11.13-1650">
-<script>window.RIGROOM_VERSION = "2026.11.13-1650";</script>
+<link rel="stylesheet" href="./src/ui.css?v=2026.11.13-2141">
+<script>window.RIGROOM_VERSION = "2026.11.13-2141";</script>
 <script type="importmap">
 {
   "imports": {
@@ -19,14 +19,14 @@
     "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/",
     "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.18/build/index.module.js",
     "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js",
-    "./src/app.js": "./src/app.js?v=2026.11.13-1650",
-    "./src/agent.js": "./src/agent.js?v=2026.11.13-1650",
-    "./src/trace.js": "./src/trace.js?v=2026.11.13-1650",
-    "./src/server.js": "./src/server.js?v=2026.11.13-1650",
-    "./src/models.js": "./src/models.js?v=2026.11.13-1650",
-    "./src/github.js": "./src/github.js?v=2026.11.13-1650",
-    "./src/studio.js": "./src/studio.js?v=2026.11.13-1650",
-    "./src/motion.js": "./src/motion.js?v=2026.11.13-1650"
+    "./src/app.js": "./src/app.js?v=2026.11.13-2141",
+    "./src/agent.js": "./src/agent.js?v=2026.11.13-2141",
+    "./src/trace.js": "./src/trace.js?v=2026.11.13-2141",
+    "./src/server.js": "./src/server.js?v=2026.11.13-2141",
+    "./src/models.js": "./src/models.js?v=2026.11.13-2141",
+    "./src/github.js": "./src/github.js?v=2026.11.13-2141",
+    "./src/studio.js": "./src/studio.js?v=2026.11.13-2141",
+    "./src/motion.js": "./src/motion.js?v=2026.11.13-2141"
   }
 }
 </script>
@@ -141,6 +141,7 @@
             <button class="btn" id="addChar">+ Character</button>
             <button class="btn" id="addBox">+ Box</button>
             <button class="btn" id="addCyl">+ Cylinder</button>
+            <button class="btn" id="addLight">+ Light</button>
             <button class="btn" id="importBtn">Import model</button>
           </div>
         </div>
@@ -148,6 +149,9 @@
           <h3>Look</h3>
           <div class="row"><span id="lookName" class="note" style="flex:1;min-width:0">Mannequin</span></div>
           <div class="row"><select id="lookPick" style="flex:1;min-width:0" aria-label="Your people" disabled><option value="">Your people…</option></select></div>
+          <div class="row" id="handsRow" style="display:none"><label for="handL">Hands</label>
+            <select id="handL" aria-label="Left hand"><option value="relaxed">L relaxed</option><option value="open">L open</option><option value="grip">L grip</option><option value="fist">L fist</option><option value="point">L point</option></select>
+            <select id="handR" aria-label="Right hand"><option value="relaxed">R relaxed</option><option value="open">R open</option><option value="grip">R grip</option><option value="fist">R fist</option><option value="point">R point</option></select></div>
           <div class="row">
             <button class="btn" id="lookReal">Real model…</button>
             <button class="btn" id="lookMannequin">Mannequin</button>
@@ -157,9 +161,15 @@
         <div class="group" id="entEdit">
           <h3>Selected</h3>
           <div class="row"><label for="entName">Name</label><input type="text" id="entName" maxlength="40"></div>
-          <div class="row"><label for="entFacing">Facing</label><input type="range" id="entFacing" min="-180" max="180" step="1" value="0"><span class="val" id="entFacingV">0°</span></div>
-          <div class="row"><label for="entSize">Scale</label><input type="range" id="entSize" min="40" max="200" step="1" value="100"><span class="val" id="entSizeV">100%</span></div>
+          <div class="row" id="facingRow"><label for="entFacing">Facing</label><input type="range" id="entFacing" min="-180" max="180" step="1" value="0"><span class="val" id="entFacingV">0°</span></div>
+          <div class="row" id="scaleRow"><label for="entSize">Scale</label><input type="range" id="entSize" min="40" max="200" step="1" value="100"><span class="val" id="entSizeV">100%</span></div>
           <div class="row" id="propSizeRow"><label for="pw">W H D</label><input type="number" id="pw" step="0.05" min="0.01"><input type="number" id="ph" step="0.05" min="0.01"><input type="number" id="pd" step="0.05" min="0.01"></div>
+          <div class="row" id="matPickRow"><label for="matPick">Material</label><select id="matPick"><option value="plain">Plain</option><option value="wood">Wood</option><option value="leather">Leather</option><option value="fabric">Fabric</option><option value="stone">Stone</option><option value="plaster">Plaster</option><option value="metal">Metal</option><option value="paper">Paper</option><option value="glass">Glass</option><option value="plastic">Plastic</option><option value="ceramic">Ceramic</option><option value="brick">Brick</option><option value="velvet">Velvet</option><option value="glow">Glow (lampshade)</option><option value="neon">Neon</option></select></div>
+          <div class="row" id="lightTypeRow"><label for="lightType">Light</label><select id="lightType"><option value="area">Soft panel</option><option value="spot">Spot</option><option value="point">Bulb</option></select></div>
+          <div class="row" id="lightPowerRow"><label for="lightPower">Power</label><input type="range" id="lightPower" min="0" max="1500" step="10" value="150"><span class="val" id="lightPowerV">150 W</span></div>
+          <div class="row" id="lightSizeRow"><label for="lightSize">Size</label><input type="range" id="lightSize" min="5" max="300" step="5" value="60"><span class="val" id="lightSizeV">60 cm</span></div>
+          <div class="row" id="lightSpreadRow"><label for="lightSpread">Spread</label><input type="range" id="lightSpread" min="10" max="150" step="1" value="60"><span class="val" id="lightSpreadV">60°</span></div>
+          <div class="row" id="lightAimRow"><label for="lightAim">Aim at</label><select id="lightAim" style="flex:1;min-width:0"></select></div>
           <div class="row" id="colorRow"><label for="entColor">Color</label><input type="color" id="entColor"></div>
           <div class="row" id="matRow"><label for="matRough">Rough</label><input type="range" id="matRough" min="0" max="100" value="80"><span class="val" id="matRoughV">80%</span></div>
           <div class="row" id="matRow2"><label for="matMetal">Metal</label><input type="range" id="matMetal" min="0" max="100" value="0"><span class="val" id="matMetalV">0%</span></div>
@@ -167,7 +177,7 @@
             <button class="btn" id="dupEnt">Duplicate</button>
             <button class="btn" id="delEnt">Delete</button>
           </div>
-          <p class="note">Use Place in the viewport to move it. Models can be .glb, or .gltf and .fbx picked together with their texture images.</p>
+          <p class="note" id="entNote">Use Place in the viewport to move it. Models can be .glb, or .gltf and .fbx picked together with their texture images.</p>
         </div>
         <input type="file" id="fileGlb" multiple hidden>
         <input type="file" id="fileLook" multiple hidden>
@@ -198,6 +208,11 @@
           <div class="row"><label for="sunHeight">Height</label><input type="range" id="sunHeight" min="5" max="85" value="55"><span class="val" id="sunHeightV">55°</span></div>
           <div class="row"><label for="sunPower">Sun power</label><input type="range" id="sunPower" min="0" max="300" value="200"><span class="val" id="sunPowerV">2.0</span></div>
           <div class="row"><label for="envPower">Ambient</label><input type="range" id="envPower" min="0" max="200" value="60"><span class="val" id="envPowerV">0.6</span></div>
+          <div class="row"><label for="skyPick">Environment</label><select id="skyPick"><option value="soft">Soft grey</option><option value="studio">Studio</option><option value="interior">Interior</option><option value="courtyard">Courtyard</option><option value="city">City</option><option value="forest">Forest</option><option value="sunrise">Sunrise</option><option value="sunset">Sunset</option><option value="night">Night</option></select></div>
+          <div class="row"><label for="skyTurn">Turn</label><input type="range" id="skyTurn" min="-180" max="180" value="0"><span class="val" id="skyTurnV">0°</span></div>
+          <div class="row"><label for="haze">Haze</label><input type="range" id="haze" min="0" max="100" value="0"><span class="val" id="hazeV">0%</span></div>
+          <div class="row"><label for="floorPick">Floor</label><select id="floorPick"><option value="matte">Matte</option><option value="wood">Wood boards</option><option value="concrete">Concrete</option><option value="tiles">Tiles</option><option value="carpet">Carpet</option></select></div>
+          <p class="note">Environment, floor and material presets show fully in render-server renders; the viewport is a preview.</p>
         </div>
         <div class="group">
           <h3>Photoreal render</h3>
@@ -288,6 +303,6 @@
 <script>
 window.addEventListener('error',e=>{ const h=document.getElementById('hint'); if(h&&/import|module|three/i.test(String(e.message))) h.textContent='The 3D library did not load. Check the connection and reload.'; });
 </script>
-<script type="module" src="./src/main.js?v=2026.11.13-1650"></script>
+<script type="module" src="./src/main.js?v=2026.11.13-2141"></script>
 </body>
 </html>

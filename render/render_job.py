@@ -14,19 +14,12 @@ import sys
 import time
 
 import bpy
-from mathutils import Vector
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import surfaces  # noqa: E402
+from surfaces import to_blender  # noqa: E402
 
 QUALITY_MAX_SAMPLES = 4096
-
-
-def to_blender(v):
-    return Vector((v[0], -v[2], v[1]))
-
-
-def hex_to_linear(h):
-    h = h.lstrip('#')
-    srgb = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
-    return [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in srgb] + [1.0]
 
 
 def args():
@@ -56,19 +49,18 @@ def setup_scene(job, job_dir):
             if strips:
                 ad.action = strips[0].action
 
-    # floor: the app draws a large matte floor that is not part of the exported stage
-    fl = job.get('floor', {})
+    look = job.get('look', {})
+    # people first (their materials come from the scans), then the set's surfaces
+    people = surfaces.shade_people(scene)
+    props = surfaces.dress_props(scene)
+
+    # floor: the app draws a large floor that is not part of the exported stage
     bpy.ops.mesh.primitive_plane_add(size=60, location=(0, 0, 0))
     floor = bpy.context.active_object
     floor.name = 'Floor'
-    mat = bpy.data.materials.new('Floor')
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get('Principled BSDF')
-    bsdf.inputs['Base Color'].default_value = hex_to_linear(fl.get('color', '#6b6e76'))
-    bsdf.inputs['Roughness'].default_value = float(fl.get('roughness', 0.92))
-    floor.data.materials.append(mat)
+    floor.data.materials.append(surfaces.floor_material(look.get('floor', 'matte'), job.get('floor', {})))
+    print('surfaces: %d people materials, %d props' % (people, props), flush=True)
 
-    look = job.get('look', {})
     # sun, aimed like the app's sun: angle around the scene, height above the horizon
     a, h = math.radians(look.get('sunAngle', 35)), math.radians(look.get('sunHeight', 55))
     toward_sun = to_blender([math.sin(a) * math.cos(h), math.sin(h), math.cos(a) * math.cos(h)]).normalized()
@@ -76,17 +68,15 @@ def setup_scene(job, job_dir):
     sun_data.energy = float(look.get('sunPower', 2.0)) * 1.6
     sun_data.angle = math.radians(1.5)
     sun_data.color = (1.0, 0.957, 0.902)
-    sun = bpy.data.objects.new('Sun', sun_data)
-    sun.rotation_euler = toward_sun.to_track_quat('Z', 'Y').to_euler()
-    scene.collection.objects.link(sun)
+    if sun_data.energy > 0.001:
+        sun = bpy.data.objects.new('Sun', sun_data)
+        sun.rotation_euler = toward_sun.to_track_quat('Z', 'Y').to_euler()
+        scene.collection.objects.link(sun)
 
-    # world: soft studio-like ambient light, like the app's environment
-    world = bpy.data.worlds.new('World')
-    world.use_nodes = True
-    bg = world.node_tree.nodes.get('Background')
-    bg.inputs['Color'].default_value = (0.62, 0.63, 0.66, 1.0)
-    bg.inputs['Strength'].default_value = float(look.get('env', 0.6)) * 1.1
-    scene.world = world
+    # the scene's own lights, the environment around it, and the air in it
+    surfaces.add_lights(scene, job.get('lights'))
+    surfaces.build_world(scene, look)
+    surfaces.add_haze(scene, float(look.get('haze', 0) or 0))
 
     # colour management: filmic-style tone mapping, exposure in stops
     vs = scene.view_settings
@@ -94,6 +84,10 @@ def setup_scene(job, job_dir):
         vs.view_transform = 'AgX'
     except TypeError:
         vs.view_transform = 'Filmic'
+    try:
+        vs.look = 'AgX - Medium High Contrast'
+    except TypeError:
+        pass
     vs.exposure = math.log2(max(0.05, float(look.get('exposure', 1.0))))
     return scene
 
@@ -151,11 +145,22 @@ def setup_render(scene, job):
         c.denoiser = 'OPENIMAGEDENOISE'
     except TypeError:
         pass
-    c.max_bounces = 8
-    c.diffuse_bounces = 4
-    c.glossy_bounces = 4
+    c.adaptive_threshold = 0.006 if c.samples >= 300 else 0.012
+    c.max_bounces = 12
+    c.diffuse_bounces = 6   # interiors are mostly lit by light that has bounced
+    c.glossy_bounces = 6
+    c.transmission_bounces = 8
+    c.volume_bounces = 1
     c.transparent_max_bounces = 8
-    c.sample_clamp_indirect = 10.0  # tames fireflies from small bright paths
+    c.caustics_reflective = False
+    c.caustics_refractive = False
+    c.blur_glossy = 1.0
+    c.sample_clamp_indirect = 8.0  # tames fireflies from small bright paths
+    # moving things smear across the open shutter, as in a film camera
+    if job.get('kind') == 'shot' and job.get('motion_blur', True):
+        r.use_motion_blur = True
+        r.motion_blur_shutter = 0.5
+    surfaces.lens_finish(scene, float(job.get('lens', 1.0)))
 
 
 def main():
@@ -177,6 +182,7 @@ def main():
         scene.frame_set(f + offset)
         scene.render.filepath = os.path.join(out_dir, 'frame_%04d.png' % f)
         bpy.ops.render.render(write_still=True)
+        surfaces.film_finish(scene.render.filepath, f, float(job.get('grain', 1.0)))
         print('rendered frame %d in %.1f s' % (f, time.time() - started), flush=True)
 
 

@@ -41,7 +41,24 @@ const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 200);
 camera.position.set(1.7, 1.45, 4.4);
 // image-based lighting: surfaces pick up soft light and reflections from a studio room
 try { const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; pm.dispose(); } catch (e) { /* no IBL */ }
-const look = { exposure: 1, sunAngle: 35, sunHeight: 55, sunPower: 2, env: 0.6 };
+const look = { exposure: 1, sunAngle: 35, sunHeight: 55, sunPower: 2, env: 0.6, sky: 'soft', skyTurn: 0, floor: 'matte', haze: 0 };
+// environments light the scene from every direction; the files are 1K HDR photographs (CC0, Poly Haven), shared with the renderer
+export const SKIES = ['soft', 'studio', 'interior', 'courtyard', 'city', 'forest', 'sunrise', 'sunset', 'night'];
+export const FLOORS = { matte: 0x6b6e76, wood: 0x7a5a40, concrete: 0x7f7e7a, tiles: 0xb5b0a6, carpet: 0x5b5560 };
+const roomEnv = scene.environment, skyCache = new Map();
+async function applySky() {
+  const name = look.sky, turn = () => { if (scene.environmentRotation) scene.environmentRotation.y = look.skyTurn * DEG; };
+  if (name === 'soft' || !SKIES.includes(name)) { scene.environment = roomEnv; if (scene.environmentRotation) scene.environmentRotation.y = 0; return; }
+  try {
+    let t = skyCache.get(name);
+    if (!t) {
+      const { EXRLoader } = await import('three/addons/loaders/EXRLoader.js');
+      const tex = await new EXRLoader().loadAsync('./assets/env/' + name + '.exr'); tex.mapping = THREE.EquirectangularReflectionMapping;
+      const pm = new THREE.PMREMGenerator(renderer); t = pm.fromEquirectangular(tex).texture; pm.dispose(); tex.dispose(); skyCache.set(name, t);
+    }
+    if (look.sky === name) { scene.environment = t; turn(); scene.environmentIntensity = look.env / 0.6; }
+  } catch (e) { scene.environment = roomEnv; }
+}
 const hemi = new THREE.HemisphereLight(0xffffff, 0x3c3f48, scene.environment ? 0.15 : 0.8); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff4e6, 1.2); sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: .5, far: 30 }); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
@@ -50,7 +67,11 @@ function applyLook() {
   renderer.toneMappingExposure = look.exposure;
   const a = look.sunAngle * DEG, h = look.sunHeight * DEG, d = 9;
   sun.position.set(Math.sin(a) * Math.cos(h) * d, Math.sin(h) * d, Math.cos(a) * Math.cos(h) * d); sun.intensity = look.sunPower;
-  if (scene.environment) scene.environmentIntensity = look.env; hemi.intensity = scene.environment ? 0.15 * look.env : 0.8 * look.env;
+  const sky = look.sky !== 'soft';
+  if (scene.environment) scene.environmentIntensity = sky ? look.env / 0.6 : look.env; hemi.intensity = sky ? 0 : scene.environment ? 0.15 * look.env : 0.8 * look.env;
+  applySky(); floor.material.color.setHex(FLOORS[look.floor] || FLOORS.matte);
+  $('#haze').value = Math.round(look.haze * 100); $('#hazeV').textContent = Math.round(look.haze * 100) + '%';
+  $('#skyPick').value = look.sky; $('#floorPick').value = look.floor; $('#skyTurn').value = look.skyTurn; $('#skyTurnV').textContent = Math.round(look.skyTurn) + '°';
   $('#exposure').value = Math.round(look.exposure * 100); $('#exposureV').textContent = look.exposure.toFixed(2);
   $('#sunAngle').value = look.sunAngle; $('#sunAngleV').textContent = Math.round(look.sunAngle) + '°';
   $('#sunHeight').value = look.sunHeight; $('#sunHeightV').textContent = Math.round(look.sunHeight) + '°';
@@ -100,7 +121,7 @@ function makeEnt(spec) {
   else if (e.kind === 'import' && e.params.model) buildImport(e);
   return e;
 }
-function applyPlacement(e) { e.group.position.fromArray(e.pos); e.group.rotation.set(e.rot[0] * DEG, e.rot[1] * DEG, e.rot[2] * DEG, 'YXZ'); e.group.scale.setScalar(e.scale); }
+function applyPlacement(e) { e.group.position.fromArray(e.pos); e.group.rotation.set(e.rot[0] * DEG, e.rot[1] * DEG, e.rot[2] * DEG, 'YXZ'); e.group.scale.setScalar(e.scale); if (e.kind === 'prop' && e.params.shape === 'light') aimLight(e); }
 function finalizeRig(e, objs) {
   e.group.updateMatrixWorld(true);
   const set = new Set(objs), used = new Set(), bones = [];
@@ -149,6 +170,44 @@ const LOOK_ORDER = ['hips', 'spine', 'chest', 'neck', 'head', 'upperArm_L', 'for
 const LOOK_CHILD = { hips: 'spine', spine: 'chest', chest: 'neck', neck: 'head', upperArm_L: 'forearm_L', forearm_L: 'hand_L', upperArm_R: 'forearm_R', forearm_R: 'hand_R', thigh_L: 'shin_L', shin_L: 'foot_L', thigh_R: 'shin_R', shin_R: 'foot_R' };
 const LOOK_INHERIT = { head: 'neck', hand_L: 'forearm_L', hand_R: 'forearm_R', foot_L: 'shin_L', foot_R: 'shin_R' };
 const _qa = new Q4(), _qb = new Q4(), _qc = new Q4(), _qd = new Q4(), _va = new V3(), _vb = new V3();
+/* hands: a look's fingers take a pose per hand (they are not on the control rig) */
+export const HAND_POSES = ['relaxed', 'open', 'grip', 'fist', 'point'];
+const CURL = {   // degrees of curl at each finger's three joints
+  open: {},
+  relaxed: { thumb: [8, 10, 8], index: [14, 20, 10], middle: [18, 24, 12], ring: [22, 28, 14], pinky: [26, 30, 14] },
+  grip: { thumb: [18, 22, 20], index: [42, 55, 30], middle: [46, 58, 32], ring: [50, 60, 32], pinky: [52, 60, 32] },
+  fist: { thumb: [28, 38, 40], index: [80, 95, 60], middle: [82, 98, 62], ring: [84, 98, 62], pinky: [86, 98, 62] },
+  point: { thumb: [28, 38, 40], index: [4, 6, 4], middle: [82, 98, 62], ring: [84, 98, 62], pinky: [86, 98, 62] }
+};
+const fingerKind = n => /thumb/i.test(n) ? 'thumb' : /index|fore/i.test(n) ? 'index' : /mid/i.test(n) ? 'middle' : /ring/i.test(n) ? 'ring' : /pinky|little/i.test(n) ? 'pinky' : null;
+function findFingers(map, S) {
+  const hand = map['hand_' + S], out = []; if (!hand) return out;
+  const P = o => o.getWorldPosition(new V3()), roots = hand.children.filter(c => c.isBone && c.children.length && fingerKind(c.name));
+  const idx = roots.find(c => fingerKind(c.name) === 'index'), pin = roots.find(c => fingerKind(c.name) === 'pinky') || roots.find(c => fingerKind(c.name) === 'ring');
+  if (!idx || !pin) return out;
+  // the palm faces away from the back of the hand, which the spread of the knuckles gives
+  const hp = P(hand), palm = P(idx).sub(hp).cross(P(pin).sub(hp)).normalize(); if (S === 'L') palm.negate();
+  for (const root of roots) {
+    let bone = root, j = 0; const kind = fingerKind(root.name);
+    while (bone && j < 3) {
+      const kid = bone.children.find(c => c.isBone); if (!kid) break;
+      const axis = P(kid).sub(P(bone)).normalize().cross(palm); if (axis.lengthSq() < 1e-6) break;
+      axis.normalize().applyQuaternion(bone.parent.getWorldQuaternion(new Q4()).invert());
+      out.push({ bone, rest: bone.quaternion.clone(), axis, kind, j }); bone = kid; j++;
+    }
+  }
+  return out;
+}
+function applyHands(e) {
+  if (!e.look) return; const H = e.params.hands || {};
+  for (const S of ['L', 'R']) { const pose = CURL[H[S]] ? H[S] : 'relaxed';
+    for (const f of e.look.fingers[S]) f.bone.quaternion.setFromAxisAngle(f.axis, ((CURL[pose][f.kind] || [0, 0, 0])[f.j] || 0) * DEG).multiply(f.rest); }
+}
+/** Set a character's hand poses: { L, R } each one of HAND_POSES. */
+export function setHands(e, hands) {
+  const H = { ...(e.params.hands || {}) }; for (const S of ['L', 'R']) if (hands && HAND_POSES.includes(hands[S])) H[S] = hands[S];
+  e.params.hands = H; applyHands(e); if (e.look) retarget(e);
+}
 function attachLook(e) {
   const obj = instantiate(e.params.look);
   if (!obj) { e.lookMissing = true; return; }
@@ -170,9 +229,9 @@ function attachLook(e) {
   }
   e.group.traverse(o => { if (o.userData.mq) o.visible = false; });
   const hips = e.byName.get('hips');
-  e.look = { wrap, entries, hips: { dst: map.hips, restChar: P(map.hips), src: hips, srcRest: hips.restWP.clone() } };
+  e.look = { wrap, entries, hips: { dst: map.hips, restChar: P(map.hips), src: hips, srcRest: hips.restWP.clone() }, fingers: { L: findFingers(map, 'L'), R: findFingers(map, 'R') } };
   e.lookMissing = false;
-  retarget(e);
+  applyHands(e); retarget(e);
 }
 export function retarget(e) {
   const L = e.look; if (!L) return;
@@ -220,18 +279,56 @@ function tintMannequin(e) {
   M.MID.color.copy(base); M.LEFT.color.copy(base).lerp(new THREE.Color(0xe6a052), .3); M.RIGHT.color.copy(base).lerp(new THREE.Color(0x5a8fe6), .3); M.DARK.color.copy(base).lerp(new THREE.Color(0x15171c), .75);
   for (const m of Object.values(M)) { m.roughness = e.params.rough; m.metalness = e.params.metal; m.needsUpdate = true; }
 }
+// material presets: the viewport shows their sheen; the render server builds the full surface (grain, pores, bumps, rounded edges)
+export const MATS = { plain: null, wood: { rough: .45 }, leather: { rough: .5 }, fabric: { rough: .9 }, stone: { rough: .7 }, plaster: { rough: .92 }, metal: { rough: .3, metal: 1 }, paper: { rough: .8 },
+  glass: { rough: .05, opacity: .3 }, plastic: { rough: .35 }, ceramic: { rough: .15 }, brick: { rough: .9 }, velvet: { rough: 1 }, glow: { glow: 1.5 }, neon: { glow: 3 } };
+export const LIGHT_TYPES = ['area', 'spot', 'point'];
+const LIGHT_K = { point: .016, spot: .016, area: .064 };   // viewport brightness per watt, matched by eye to the renderer
+const isLight = e => !!e && e.kind === 'prop' && e.params.shape === 'light';
+function lightMesh(e) {
+  const p = e.params; p.type = LIGHT_TYPES.includes(p.type) ? p.type : 'area'; p.power = clamp(isFinite(p.power) ? +p.power : 150, 0, 5000); p.color = isHex(p.color) ? p.color : '#ffe9cf';
+  p.lsize = clamp(+p.lsize || .6, .02, 5); p.spread = clamp(+p.spread || 60, 5, 160); p.target = num3(p.target, null); p.size = [.1, .1, .1];
+  const g = new THREE.Group(), col = new THREE.Color(p.color);
+  const L = p.type === 'point' ? new THREE.PointLight(col, p.power * LIGHT_K.point, 0, 2) : new THREE.SpotLight(col, p.power * LIGHT_K[p.type], 0, p.type === 'area' ? 80 * DEG : p.spread / 2 * DEG, p.type === 'area' ? 1 : .35, 2);
+  g.add(L); if (L.target) { L.target.position.set(0, 0, 1); g.add(L.target); }
+  // what you see and tap in the viewport; never rendered
+  const giz = new THREE.Group(), gm = new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, transparent: true, opacity: .85 });
+  giz.add(new THREE.Mesh(new THREE.SphereGeometry(.05, 14, 10), gm));
+  if (p.type !== 'point') { const d = new THREE.Mesh(p.type === 'area' ? new THREE.RingGeometry(p.lsize / 2 * .92, p.lsize / 2, 40) : new THREE.ConeGeometry(Math.tan(p.spread / 2 * DEG) * .3, .3, 24, 1, true), gm);
+    if (p.type === 'spot') { d.rotation.x = -Math.PI / 2; d.position.z = .15; } giz.add(d);
+    const ray = new THREE.Mesh(new THREE.CylinderGeometry(.006, .006, .45, 6), gm); ray.rotation.x = Math.PI / 2; ray.position.z = .225; giz.add(ray); }
+  giz.visible = overlaysOn; g.add(giz); e.gizmo = giz; return g;
+}
+let overlaysOn = true;
+function aimLight(e) {
+  const t = e.params.target ? new V3(...e.params.target) : new V3(e.pos[0], e.pos[1] - 1, e.pos[2] + 1e-4);
+  e.group.rotation.set(0, 0, 0); e.group.lookAt(t);
+}
+/** Every light on stage, for the render job: where it is, what it aims at, and how bright. */
+export function lightList() {
+  return ents.filter(isLight).map(e => { const p = e.params, pos = e.bones[0].obj.getWorldPosition(new V3()), t = p.target ? new V3(...p.target) : new V3(pos.x, pos.y - 1, pos.z);
+    return { name: e.name, type: p.type, power: p.power, color: p.color, size: p.lsize, spread: p.spread, p: pos.toArray().map(r2), t: t.toArray().map(r2) }; });
+}
 function propMesh(e) {
+  if (e.params.shape === 'light') return lightMesh(e);
   const p = e.params, s = num3(p.size, [.5, .5, .5]).map(v => Math.max(.005, v)); let geo;
+  if (!(p.mat in MATS)) p.mat = 'plain';
   if (p.shape === 'cylinder') geo = new THREE.CylinderGeometry(.5, .5, 1, 36); else if (p.shape === 'sphere') geo = new THREE.SphereGeometry(.5, 28, 18); else geo = new THREE.BoxGeometry(1, 1, 1);
-  const me = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: new THREE.Color(p.color || '#8d8f96'), roughness: p.rough, metalness: p.metal })); me.scale.set(s[0], s[1], s[2]); me.castShadow = true; me.receiveShadow = true; return me;
+  const pre = MATS[p.mat], col = new THREE.Color(p.color || '#8d8f96');
+  const mat = new THREE.MeshStandardMaterial({ name: 'rr:' + p.mat, color: col, roughness: pre ? pre.rough ?? .6 : p.rough, metalness: pre ? pre.metal || 0 : p.metal });
+  if (pre && pre.opacity) { mat.transparent = true; mat.opacity = pre.opacity; }
+  if (pre && pre.glow) { mat.emissive = col; mat.emissiveIntensity = pre.glow; }
+  const me = new THREE.Mesh(geo, mat); me.scale.set(s[0], s[1], s[2]); me.castShadow = !(pre && (pre.opacity || pre.glow)); me.receiveShadow = true; return me;
 }
 function buildProp(e) { const node = new THREE.Object3D(); node.name = 'object'; e.group.add(node); e.mesh = propMesh(e); node.add(e.mesh); finalizeRig(e, [node]); }
-function refreshProp(e) { const node = e.bones[0].obj; node.remove(e.mesh); e.mesh.geometry.dispose(); e.mesh = propMesh(e); node.add(e.mesh); }
+function refreshProp(e) { const node = e.bones[0].obj; node.remove(e.mesh); e.mesh.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.dispose && o.isLight) o.dispose(); }); e.mesh = propMesh(e); node.add(e.mesh); if (isLight(e)) aimLight(e); }
 function applyMaterial(e) { if (e.kind === 'mannequin') tintMannequin(e); else if (e.kind === 'prop') refreshProp(e); }
 
 export function addMannequin(o) { o = o || {}; const e = makeEnt({ kind: 'mannequin', name: uniqueName(o.name || 'Character'), params: { color: o.color || '#b4b9c4', rough: .8, metal: 0 } });
   e.pos = num3(o.pos, [0, 0, 0]); e.rot = [0, +o.facing || 0, 0]; e.scale = clamp(+o.scale || 1, .2, 5); applyPlacement(e); ents.push(e); return e; }
-export function addProp(o) { o = o || {}; const e = makeEnt({ kind: 'prop', name: uniqueName(o.name || 'Prop'), params: { shape: ['box', 'cylinder', 'sphere'].includes(o.shape) ? o.shape : 'box', size: num3(o.size, [.5, .5, .5]), color: o.color || '#8d8f96', rough: o.rough ?? .85, metal: o.metal ?? 0 } });
+export function addLight(o) { o = o || {}; const e = makeEnt({ kind: 'prop', name: uniqueName(o.name || 'Light'), params: { shape: 'light', type: o.type, power: o.power, color: o.color, lsize: o.size, spread: o.spread, target: num3(o.target, null) } });
+  e.pos = num3(o.pos, [0, 2.4, 0]); e.rot = [0, 0, 0]; e.scale = 1; applyPlacement(e); ents.push(e); return e; }
+export function addProp(o) { o = o || {}; const e = makeEnt({ kind: 'prop', name: uniqueName(o.name || 'Prop'), params: { shape: ['box', 'cylinder', 'sphere'].includes(o.shape) ? o.shape : 'box', size: num3(o.size, [.5, .5, .5]), color: o.color || '#8d8f96', rough: o.rough ?? .85, metal: o.metal ?? 0, mat: o.mat in MATS ? o.mat : 'plain' } });
   e.pos = num3(o.pos, [0, .25, 0]); e.rot = num3(o.rot, [0, 0, 0]); e.scale = 1; applyPlacement(e); ents.push(e); return e; }
 function detach(e) { stage.remove(e.group); e.bones.forEach(b => handles.remove(b.handle)); if (sel && sel.ent === e) sel = null; if (e.kind === 'import') graveyard.set(e.id, e); }
 function reattach(e) { stage.add(e.group); e.bones.forEach(b => handles.add(b.handle)); graveyard.delete(e.id); }
@@ -423,7 +520,9 @@ function applyScene(o, reuse) {
   anim.fps = clamp(+o.fps || 24, 1, 60); anim.length = clamp(Math.round(+o.length || 48), 1, 2000); anim.loop = o.loop !== false; anim.ease = ['spline', 'ease', 'linear'].includes(o.ease) ? o.ease : 'spline';
   camKeys.length = 0; for (const k of (Array.isArray(o.cam) ? o.cam : [])) if (k && num3(k.p) && num3(k.t) && isFinite(k.f)) camKeys.push({ f: Math.round(k.f), p: k.p.map(Number), t: k.t.map(Number), fov: clamp(+k.fov || 35, 10, 90) });
   camKeys.sort((a, b) => a.f - b.f);
-  if (o.look) { for (const k of Object.keys(look)) if (isFinite(o.look[k])) look[k] = +o.look[k]; } applyLook();
+  if (o.look) { for (const k of Object.keys(look)) if (typeof look[k] === 'number' && o.look[k] != null && isFinite(o.look[k])) look[k] = +o.look[k];
+    look.sky = SKIES.includes(o.look.sky) ? o.look.sky : 'soft'; look.floor = o.look.floor in FLOORS ? o.look.floor : 'matte'; }
+  applyLook();
   const keep = new Map(ents.map(e => [e.id, e])), next = []; let skipped = 0;
   for (const s of (Array.isArray(o.ents) ? o.ents : [])) {
     if (!s || !['mannequin', 'prop', 'import'].includes(s.kind)) continue;
@@ -578,6 +677,8 @@ function refreshLookUI() {
   const isChar = !!active && active.kind === 'mannequin', looked = isChar && !!active.params.look;
   $('#lookReal').disabled = !isChar; $('#lookMannequin').disabled = !looked; if ($('#lookPick').options.length > 1) $('#lookPick').disabled = !isChar;
   if ($('#motionPick')) updateMotionNote();
+  $('#handsRow').style.display = looked ? 'flex' : 'none';
+  if (looked) for (const S of ['L', 'R']) $('#hand' + S).value = (active.params.hands && HAND_POSES.includes(active.params.hands[S])) ? active.params.hands[S] : 'relaxed';
   $('#lookName').textContent = !isChar ? (active ? active.name + ' is not a character.' : 'Nothing selected.')
     : active.name + ': ' + (looked ? active.params.lookName + (active.lookMissing ? ' (not on this device, so the mannequin stands in)' : '') : 'mannequin');
   $('#lookNote').textContent = isChar ? 'Pick one of your people above, or Real model… to import a rigged human (.glb, or .fbx picked with its textures). Poses, animation and the agent keep working.'
@@ -586,17 +687,25 @@ function refreshLookUI() {
 export function refreshStageUI() {
   const list = $('#entList'); list.textContent = '';
   for (const e of ents) { const el = document.createElement('button'); el.className = 'item' + (e === active ? ' on' : '') + (Object.keys(e.tracks).length ? ' keyed' : '');
-    const sm = document.createElement('small'); sm.textContent = e.kind === 'prop' ? e.params.shape : (e.kind === 'import' ? 'model' : 'character');
+    const sm = document.createElement('small'); sm.textContent = e.kind === 'prop' ? (isLight(e) ? e.params.type + ' light' : e.params.shape) : (e.kind === 'import' ? 'model' : 'character');
     el.append(document.createElement('i'), document.createTextNode(e.name), sm); el.onclick = () => { setActive(e); if (e.bones.length === 1) select(e.bones[0]); }; list.append(el); }
   refreshLookUI();
   const ed = $('#entEdit'); ed.style.display = active ? 'flex' : 'none'; if (!active) return;
   $('#entName').value = active.name; $('#entFacing').value = Math.round(active.rot[1]); $('#entFacingV').textContent = Math.round(active.rot[1]) + '°';
   $('#entSize').value = Math.round(active.scale * 100); $('#entSizeV').textContent = Math.round(active.scale * 100) + '%';
-  const isProp = active.kind === 'prop', isChar = active.kind === 'mannequin', looked = isChar && !!active.params.look, hasMat = isChar ? !looked : active.kind !== 'import';
+  const lit = isLight(active), isProp = active.kind === 'prop' && !lit, isChar = active.kind === 'mannequin', looked = isChar && !!active.params.look, hasMat = isChar ? !looked : active.kind !== 'import';
+  const preset = isProp && active.params.mat !== 'plain';
   refreshLookUI();
-  $('#propSizeRow').style.display = isProp ? 'flex' : 'none'; for (const id of ['colorRow', 'matRow', 'matRow2']) $('#' + id).style.display = hasMat ? 'flex' : 'none';
-  if (isProp) ['pw', 'ph', 'pd'].forEach((id, i) => $('#' + id).value = active.params.size[i]);
-  if (hasMat) { $('#entColor').value = active.params.color; $('#matRough').value = Math.round(active.params.rough * 100); $('#matRoughV').textContent = Math.round(active.params.rough * 100) + '%'; $('#matMetal').value = Math.round(active.params.metal * 100); $('#matMetalV').textContent = Math.round(active.params.metal * 100) + '%'; }
+  const show = (id, on) => { $('#' + id).style.display = on ? 'flex' : 'none'; };
+  show('propSizeRow', isProp); show('colorRow', hasMat); show('matRow', hasMat && !lit && !preset); show('matRow2', hasMat && !lit && !preset); show('matPickRow', isProp);
+  show('facingRow', !lit); show('scaleRow', !lit); for (const id of ['lightTypeRow', 'lightPowerRow', 'lightSizeRow', 'lightAimRow']) show(id, lit); show('lightSpreadRow', lit && active.params.type === 'spot');
+  $('#entNote').textContent = lit ? 'Use Place to move the light. It shines at the point you aim it at; the render server draws its real soft shadows.' : 'Use Place in the viewport to move it. Models can be .glb, or .gltf and .fbx picked together with their texture images.';
+  if (isProp) { ['pw', 'ph', 'pd'].forEach((id, i) => $('#' + id).value = active.params.size[i]); $('#matPick').value = active.params.mat || 'plain'; }
+  if (lit) { const p = active.params; $('#lightType').value = p.type; $('#lightPower').value = p.power; $('#lightPowerV').textContent = Math.round(p.power) + ' W'; $('#lightSize').value = Math.round(p.lsize * 100); $('#lightSizeV').textContent = Math.round(p.lsize * 100) + ' cm';
+    $('#lightSpread').value = p.spread; $('#lightSpreadV').textContent = Math.round(p.spread) + '°';
+    const pick = $('#lightAim'); pick.textContent = ''; pick.append(new Option(p.target ? 'Aimed at ' + p.target.map(r1).join(', ') : 'Aimed straight down', ''), new Option('Straight down', 'down'));
+    for (const c of ents) if (c.kind !== 'prop') pick.append(new Option(c.name, 'ent:' + c.id)); for (const c of ents) if (c.kind === 'prop' && !isLight(c)) pick.append(new Option(c.name, 'ent:' + c.id)); pick.value = ''; }
+  if (hasMat) { $('#entColor').value = active.params.color || '#ffffff'; $('#matRough').value = Math.round(active.params.rough * 100); $('#matRoughV').textContent = Math.round(active.params.rough * 100) + '%'; $('#matMetal').value = Math.round(active.params.metal * 100); $('#matMetalV').textContent = Math.round(active.params.metal * 100) + '%'; }
   refreshHeader();
 }
 $('#entName').onchange = e => { if (!active) return; const v = e.target.value.trim(); if (!v) return refreshStageUI(); pushUndo(); active.name = uniqueName(v.slice(0, 40), active); refreshStageUI(); select(sel); changed(); };
@@ -607,8 +716,21 @@ $('#entSize').addEventListener('input', e => { if (!active) return; placeBegin()
 $('#matRough').addEventListener('input', e => { if (!active || active.kind === 'import') return; placeBegin(); active.params.rough = +e.target.value / 100; applyMaterial(active); $('#matRoughV').textContent = e.target.value + '%'; });
 $('#matMetal').addEventListener('input', e => { if (!active || active.kind === 'import') return; placeBegin(); active.params.metal = +e.target.value / 100; applyMaterial(active); $('#matMetalV').textContent = e.target.value + '%'; });
 ['entFacing', 'entSize', 'matRough', 'matMetal'].forEach(id => $('#' + id).addEventListener('change', () => { placing = false; changed(); }));
+$('#matPick').onchange = e => { if (!active || active.kind !== 'prop' || isLight(active)) return; pushUndo(); active.params.mat = e.target.value; refreshProp(active); refreshStageUI(); changed(); };
+$('#lightType').onchange = e => { if (!isLight(active)) return; pushUndo(); active.params.type = e.target.value; refreshProp(active); refreshStageUI(); changed(); };
+for (const [id, key, div, unit] of [['lightPower', 'power', 1, ' W'], ['lightSize', 'lsize', 100, ' cm'], ['lightSpread', 'spread', 1, '°']]) {
+  $('#' + id).addEventListener('input', e => { if (!isLight(active)) return; placeBegin(); active.params[key] = +e.target.value / div; refreshProp(active); $('#' + id + 'V').textContent = e.target.value + unit; });
+  $('#' + id).addEventListener('change', () => { placing = false; changed(); });
+}
+$('#lightAim').onchange = e => { if (!isLight(active)) return; const v = e.target.value; if (!v) return; pushUndo();
+  if (v === 'down') active.params.target = null;
+  else { const c = ents.find(x => 'ent:' + x.id === v); if (c) { const b = c.byName.get('head') || c.byName.get('chest') || c.bones[0]; active.params.target = b.obj.getWorldPosition(new V3()).toArray().map(r2); } }
+  aimLight(active); refreshStageUI(); changed(); };
+$('#addLight').onclick = () => { pushUndo(); const p = spot(); p[1] = 2.4; const e = addLight({ name: 'Light', type: 'area', pos: p }); setActive(e); mode = 'place'; select(e.bones[0]); changed(); toast(e.name + ' added. Place it, then aim it at someone.'); };
+for (const S of ['L', 'R']) $('#hand' + S).onchange = e => { if (!active || active.kind !== 'mannequin') return; pushUndo(); setHands(active, { [S]: e.target.value }); changed(); };
 ['pw', 'ph', 'pd'].forEach((id, i) => $('#' + id).onchange = e => { if (!active || active.kind !== 'prop') return; const v = clamp(+e.target.value || .1, .005, 50); pushUndo(); active.params.size[i] = v; refreshProp(active); changed(); });
 $('#entColor').onchange = e => { if (!active || active.kind === 'import') return; pushUndo(); active.params.color = e.target.value; applyMaterial(active); changed(); };
+// colour pickers have no "empty" state: a light shows its own colour there
 const spot = () => { const t = orbit.target; return [r2(t.x), 0, r2(t.z)]; };
 $('#addChar').onclick = () => { pushUndo(); const e = addMannequin({ pos: spot() }); setActive(e); mode = 'place'; select(e.bones[0]); changed(); toast(e.name + ' added. Drag the arrows to place it.'); };
 $('#addBox').onclick = () => { pushUndo(); const p = spot(); p[1] = .25; const e = addProp({ name: 'Box', shape: 'box', size: [.5, .5, .5], pos: p }); setActive(e); mode = 'place'; select(e.bones[0]); changed(); };
@@ -688,8 +810,10 @@ function keyCamera(quiet) { const f = Math.round(frame), k = { f, p: camera.posi
 $('#keyCam').onclick = () => { if (shotView) return toast('Turn off Shot view, frame the scene, then Key camera.'); pushUndo(); keyCamera(); };
 $('#delCam').onclick = () => { const f = Math.round(frame), i = camKeys.findIndex(k => k.f === f); if (i < 0) return toast('No camera key on frame ' + f + '.'); pushUndo(); camKeys.splice(i, 1); if (!camKeys.length && shotView) setShot(false); changed(); toast('Camera key deleted.'); };
 $('#lens').addEventListener('input', e => { camera.fov = +e.target.value; camera.updateProjectionMatrix(); $('#lensV').textContent = e.target.value + '°'; });
-for (const [id, key, div] of [['exposure', 'exposure', 100], ['sunAngle', 'sunAngle', 1], ['sunHeight', 'sunHeight', 1], ['sunPower', 'sunPower', 100], ['envPower', 'env', 100]])
+for (const [id, key, div] of [['exposure', 'exposure', 100], ['sunAngle', 'sunAngle', 1], ['sunHeight', 'sunHeight', 1], ['sunPower', 'sunPower', 100], ['envPower', 'env', 100], ['skyTurn', 'skyTurn', 1], ['haze', 'haze', 100]])
   $('#' + id).addEventListener('input', e => { look[key] = +e.target.value / div; applyLook(); changed(); });
+$('#skyPick').onchange = e => { pushUndo(); look.sky = e.target.value; applyLook(); changed(); };
+$('#floorPick').onchange = e => { pushUndo(); look.floor = e.target.value; applyLook(); changed(); };
 export function setRef(kind, url, aspect) { if (ref.url && ref.kind === 'file' && ref.url !== url) { try { URL.revokeObjectURL(ref.url); } catch (e) { /* ignore */ } }
   ref.kind = kind; ref.url = url; ref.aspect = aspect || 16 / 9; if (url) refEl.src = url; else refEl.removeAttribute('src');
   $('#refNote').textContent = kind === 'sketch' ? 'Your booth sketch is loaded. It shows over the scene in Shot view.' : (url ? 'Shown over the scene in Shot view.' : 'No image loaded. Load a drawing to pose against it in Shot view.');
@@ -781,7 +905,8 @@ export function exportGLB(opts) {
   return new Promise((res, rej) => { pause(); const keep = frame; let clip = null;
     if (animated) { try { clip = bakeClip(); } catch (e) { return rej(e); } } else evaluate(keep);
     stage.updateMatrixWorld(true);
-    new GLTFExporter().parse(stage, out => { applyFrame(keep); res(out); }, err => { applyFrame(keep); rej(err); }, { binary: true, maxTextureSize: 2048, animations: clip && clip.tracks.length ? [clip] : [] }); });
+    const lit = ents.filter(isLight); lit.forEach(e => { e.group.visible = false; }); const back = () => { lit.forEach(e => { e.group.visible = true; }); applyFrame(keep); };
+    new GLTFExporter().parse(stage, out => { back(); res(out); }, err => { back(); rej(err); }, { binary: true, maxTextureSize: 2048, animations: clip && clip.tracks.length ? [clip] : [] }); });
 }
 // the shot camera at a frame, or the free view when no camera is keyed
 export function cameraAt(f) { const k = camAt(f); return k ? { p: k.p.slice(), t: k.t.slice(), fov: k.fov } : { p: camera.position.toArray(), t: orbit.target.toArray(), fov: camera.fov }; }
@@ -801,7 +926,7 @@ $('#videoBtn').onclick = () => {
   recording = { finish() { if (rec.state !== 'inactive') setTimeout(() => rec.stop(), 120); } };
   pause(); applyFrame(0); rec.start(); toast('Rendering ' + (anim.length / anim.fps).toFixed(1) + ' seconds…'); play();
 };
-function setOverlays(on) { handles.visible = on; if (boneLines) boneLines.visible = on; grid.visible = on; tcHelper.visible = on; if (!on) tc.detach(); }
+function setOverlays(on) { overlaysOn = on; for (const e of ents) if (e.gizmo) e.gizmo.visible = on; handles.visible = on; if (boneLines) boneLines.visible = on; grid.visible = on; tcHelper.visible = on; if (!on) tc.detach(); }
 
 /* ───────── agent tools: the app's own commands ───────── */
 let turnUndo = false, turnMutated = false, wantPlay = null, wantShot = false;
@@ -820,10 +945,12 @@ export function writeKey(e, b, f, rot, pos) {
   if (b.isRoot) { if (pos) p = offsetToLocalPos(b, pos); else { const tr = e.tracks[b.name]; if (tr && tr.length) { evalTrack(b, tr, f); p = b.obj.position.clone(); } else p = b.restP.clone(); } }
   setKey(e, b.name, f, eulerToLocal(b, rot), p);
 }
-function entInfo(e) { const o = { name: e.name, kind: e.kind === 'prop' ? 'prop' : 'character', position: e.pos.map(r2) };
+function entInfo(e) { if (isLight(e)) { const p = e.params; return { name: e.name, kind: 'light', type: p.type, position: e.pos.map(r2), target: p.target ? p.target.map(r2) : 'straight down', power_watts: p.power, color: p.color, size: p.lsize, spread: p.type === 'spot' ? p.spread : undefined }; }
+  const o = { name: e.name, kind: e.kind === 'prop' ? 'prop' : 'character', position: e.pos.map(r2) };
   if (e.kind === 'prop') { o.shape = e.params.shape; o.size = e.params.size.map(r2); o.rotation = e.rot.map(r1); } else { o.facing = r1(e.rot[1]); o.scale = r2(e.scale); o.rig = e.kind === 'mannequin' ? 'mannequin' : 'imported (' + e.bones.length + ' bones)'; }
-  if (e.kind === 'prop' || (e.kind === 'mannequin' && !e.params.look)) o.material = { color: e.params.color, roughness: e.params.rough, metalness: e.params.metal };
-  if (e.kind === 'mannequin') o.look = e.params.look ? e.params.lookName : 'mannequin';
+  if (e.kind === 'prop' && e.params.mat !== 'plain') o.material = { preset: e.params.mat, color: e.params.color };
+  else if (e.kind === 'prop' || (e.kind === 'mannequin' && !e.params.look)) o.material = { color: e.params.color, roughness: e.params.rough, metalness: e.params.metal };
+  if (e.kind === 'mannequin') { o.look = e.params.look ? e.params.lookName : 'mannequin'; if (e.params.look) o.hands = { left: (e.params.hands && e.params.hands.L) || 'relaxed', right: (e.params.hands && e.params.hands.R) || 'relaxed' }; }
   const n = Object.values(e.tracks).reduce((s, t) => s + t.length, 0); if (n) o.keyframes = n; return o; }
 const A3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 };
 export const TOOLS = [
@@ -883,16 +1010,21 @@ export const TOOLS = [
     input_schema: { type: 'object', properties: { name: { type: 'string' }, position: A3, facing: { type: 'number' }, scale: { type: 'number' }, color: { type: 'string', description: 'hex like #b4b9c4' } } },
     execute(i) { i = i || {}; mutate(); const e = addMannequin({ name: i.name, pos: num3(i.position, [0, 0, 0]), facing: +i.facing || 0, scale: +i.scale || 1, color: isHex(i.color) ? i.color : undefined }); act('added character ' + e.name); return entInfo(e); } },
   { name: 'add_prop', description: 'Add a prop: a box, cylinder or sphere. size is [width, height, depth] in meters, position is its center in scene space, rotation is [x,y,z] degrees.',
-    input_schema: { type: 'object', required: ['shape', 'size', 'position'], properties: { name: { type: 'string' }, shape: { type: 'string', enum: ['box', 'cylinder', 'sphere'] }, size: A3, position: A3, rotation: A3, color: { type: 'string' }, roughness: { type: 'number' }, metalness: { type: 'number' } } },
+    input_schema: { type: 'object', required: ['shape', 'size', 'position'], properties: { name: { type: 'string' }, shape: { type: 'string', enum: ['box', 'cylinder', 'sphere'] }, size: A3, position: A3, rotation: A3, color: { type: 'string' }, material: { type: 'string', enum: Object.keys(MATS) }, roughness: { type: 'number' }, metalness: { type: 'number' } } },
     execute(i) { if (!num3(i.size) || !num3(i.position)) throw new Error('size and position must each be three numbers'); mutate();
-      const e = addProp({ name: i.name || i.shape, shape: i.shape, size: i.size.map(v => clamp(Math.abs(v), .005, 50)), pos: i.position, rot: num3(i.rotation, [0, 0, 0]), color: isHex(i.color) ? i.color : undefined, rough: isFinite(i.roughness) ? clamp(+i.roughness, 0, 1) : undefined, metal: isFinite(i.metalness) ? clamp(+i.metalness, 0, 1) : undefined }); act('added prop ' + e.name); return entInfo(e); } },
-  { name: 'place', description: 'Move, turn, resize, recolor or change the material of a character or prop where it stands (not animated). Give only the fields to change. roughness and metalness are 0 to 1.',
-    input_schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, position: A3, facing: { type: 'number' }, rotation: A3, scale: { type: 'number' }, size: A3, color: { type: 'string' }, roughness: { type: 'number' }, metalness: { type: 'number' }, rename: { type: 'string' } } },
+      const e = addProp({ name: i.name || i.shape, shape: i.shape, size: i.size.map(v => clamp(Math.abs(v), .005, 50)), pos: i.position, rot: num3(i.rotation, [0, 0, 0]), color: isHex(i.color) ? i.color : undefined, mat: i.material, rough: isFinite(i.roughness) ? clamp(+i.roughness, 0, 1) : undefined, metal: isFinite(i.metalness) ? clamp(+i.metalness, 0, 1) : undefined }); act('added prop ' + e.name); return entInfo(e); } },
+  { name: 'add_light', description: 'Add a light. type "area" (a soft panel, the usual choice: bigger size gives softer shadows), "spot" (a cone, spread in degrees) or "point" (a bare bulb). position and target are scene-space points; without a target it shines straight down. power is in watts (a key light 1.5 m from a face: 150 to 400; a fill: 40 to 120). color is hex: warm lamp #ffd9b0, daylight #dfe9ff. size is the panel or bulb width in meters.',
+    input_schema: { type: 'object', required: ['position'], properties: { name: { type: 'string' }, type: { type: 'string', enum: LIGHT_TYPES }, position: A3, target: A3, power: { type: 'number' }, color: { type: 'string' }, size: { type: 'number' }, spread: { type: 'number' } } },
+    execute(i) { if (!num3(i.position)) throw new Error('position must be three numbers'); mutate();
+      const e = addLight({ name: i.name, type: i.type, pos: i.position.map(Number), target: i.target, power: i.power, color: isHex(i.color) ? i.color : undefined, size: i.size, spread: i.spread }); refreshStageUI(); act('added light ' + e.name); return entInfo(e); } },
+  { name: 'place', description: 'Move, turn, resize, recolor or change the material of a character, prop or light where it stands (not animated). Give only the fields to change. material is a preset for props; roughness and metalness (0 to 1) apply to the "plain" material. For lights: target, power (watts), light_type, light_size (meters), spread (degrees), color.',
+    input_schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, position: A3, facing: { type: 'number' }, rotation: A3, scale: { type: 'number' }, size: A3, color: { type: 'string' }, material: { type: 'string', enum: Object.keys(MATS) }, roughness: { type: 'number' }, metalness: { type: 'number' }, target: A3, power: { type: 'number' }, light_type: { type: 'string', enum: LIGHT_TYPES }, light_size: { type: 'number' }, spread: { type: 'number' }, rename: { type: 'string' } } },
     execute(i) { const e = needEnt(i.name); mutate();
       if (num3(i.position)) e.pos = i.position.map(Number); if (num3(i.rotation)) e.rot = i.rotation.map(Number); if (isFinite(i.facing)) e.rot[1] = +i.facing;
       if (isFinite(i.scale) && e.kind !== 'prop') e.scale = clamp(+i.scale, .05, 20); applyPlacement(e);
       if (e.kind !== 'import') { if (isHex(i.color)) e.params.color = i.color; if (isFinite(i.roughness)) e.params.rough = clamp(+i.roughness, 0, 1); if (isFinite(i.metalness)) e.params.metal = clamp(+i.metalness, 0, 1); }
-      if (e.kind === 'prop' && num3(i.size)) e.params.size = i.size.map(v => clamp(Math.abs(v), .005, 50));
+      if (e.kind === 'prop' && !isLight(e)) { if (num3(i.size)) e.params.size = i.size.map(v => clamp(Math.abs(v), .005, 50)); if (i.material in MATS) e.params.mat = i.material; }
+      if (isLight(e)) { const p = e.params; if (num3(i.target)) p.target = i.target.map(Number); if (isFinite(i.power)) p.power = +i.power; if (LIGHT_TYPES.includes(i.light_type)) p.type = i.light_type; if (isFinite(i.light_size)) p.lsize = +i.light_size; if (isFinite(i.spread)) p.spread = +i.spread; }
       applyMaterial(e);
       if (i.rename) e.name = uniqueName(String(i.rename).slice(0, 40), e);
       act('placed ' + e.name); return entInfo(e); } },
@@ -905,11 +1037,12 @@ export const TOOLS = [
       const f = clamp(Math.round(+i.frame || 0), 0, anim.length), k = { f, p: i.position.map(Number), t: i.target.map(Number), fov: clamp(+i.fov || 35, 10, 90) };
       const x = camKeys.findIndex(c => c.f >= f); if (x < 0) camKeys.push(k); else if (camKeys[x].f === f) camKeys[x] = k; else camKeys.splice(x, 0, k);
       wantShot = true; act('camera keyed at frame ' + f); return { camera_keys: camKeys.length }; } },
-  { name: 'set_lighting', description: 'Change the lighting: exposure (0.2 to 2), sun angle in degrees around the scene, sun height in degrees above the horizon, sun power (0 to 3), ambient (0 to 2).',
-    input_schema: { type: 'object', properties: { exposure: { type: 'number' }, sun_angle: { type: 'number' }, sun_height: { type: 'number' }, sun_power: { type: 'number' }, ambient: { type: 'number' } } },
+  { name: 'set_lighting', description: 'Change the overall lighting: exposure (0.2 to 2), sun angle in degrees around the scene, sun height in degrees above the horizon, sun power (0 to 3; 0 turns the sun off for interiors lit by lights), ambient (0 to 2, the strength of the environment), environment (the surroundings that light the scene: "soft" even grey, or a photographed "studio", "interior", "courtyard", "city", "forest", "sunrise", "sunset", "night"), environment_turn in degrees, floor ("matte", "wood", "concrete", "tiles", "carpet"), and haze (0 to 1: smoke or dust in the air, which makes light beams visible and softens the distance; 0.2 to 0.4 suits a bar).',
+    input_schema: { type: 'object', properties: { exposure: { type: 'number' }, sun_angle: { type: 'number' }, sun_height: { type: 'number' }, sun_power: { type: 'number' }, ambient: { type: 'number' }, environment: { type: 'string', enum: SKIES }, environment_turn: { type: 'number' }, floor: { type: 'string', enum: Object.keys(FLOORS) }, haze: { type: 'number' } } },
     execute(i) { i = i || {}; mutate();
       if (isFinite(i.exposure)) look.exposure = clamp(+i.exposure, .2, 2); if (isFinite(i.sun_angle)) look.sunAngle = clamp(+i.sun_angle, -180, 180); if (isFinite(i.sun_height)) look.sunHeight = clamp(+i.sun_height, 5, 85);
-      if (isFinite(i.sun_power)) look.sunPower = clamp(+i.sun_power, 0, 3); if (isFinite(i.ambient)) look.env = clamp(+i.ambient, 0, 2); applyLook(); act('lighting changed'); return { ...look }; } },
+      if (isFinite(i.sun_power)) look.sunPower = clamp(+i.sun_power, 0, 3); if (isFinite(i.ambient)) look.env = clamp(+i.ambient, 0, 2);
+      if (SKIES.includes(i.environment)) look.sky = i.environment; if (isFinite(i.environment_turn)) look.skyTurn = clamp(+i.environment_turn, -180, 180); if (i.floor in FLOORS) look.floor = i.floor; if (isFinite(i.haze)) look.haze = clamp(+i.haze, 0, 1); applyLook(); act('lighting changed'); return { ...look }; } },
   { name: 'list_looks', description: 'List the human models stored on this device that characters can wear.',
     input_schema: { type: 'object', properties: {} },
     async execute() { const m = (await libraryModels()).filter(x => x.rigged !== false); return { looks: m.map(x => x.name), note: m.length ? undefined : 'No models yet. The user adds them with Stage → Look → Real model.' }; } },
@@ -921,6 +1054,10 @@ export const TOOLS = [
       if (!m) throw new Error('No stored look called "' + i.look + '". Stored looks: ' + (all.map(x => x.name).join(', ') || 'none'));
       const miss = await preloadModels([m.hash]); if (miss.length) throw new Error(m.name + ' is in the studio but could not be fetched.');
       mutate(); swapLook(e, m.hash, m.name); act(e.name + ' now wears ' + m.name); return { character: e.name, look: m.name }; } },
+  { name: 'set_hands', description: 'Pose the fingers of a character that wears a look: left and right each "relaxed" (default), "open" (flat), "grip" (holding something), "fist" or "point". Hands are a setting on the character, not keyframes.',
+    input_schema: { type: 'object', required: ['character'], properties: { character: { type: 'string' }, left: { type: 'string', enum: HAND_POSES }, right: { type: 'string', enum: HAND_POSES } } },
+    execute(i) { const e = needEnt(i.character); if (e.kind !== 'mannequin' || !e.params.look) throw new Error(e.name + ' does not wear a look, so it has no fingers to pose.');
+      mutate(); setHands(e, { L: i.left, R: i.right }); refreshStageUI(); act(e.name + ' hands posed'); return entInfo(e); } },
   { name: 'list_motions', description: 'List the recorded motions (motion capture) the user has imported: name and length in seconds.',
     input_schema: { type: 'object', properties: {} },
     async execute() { const m = await listMotions(); return { motions: m.map(x => ({ name: x.name, seconds: x.seconds })), note: m.length ? undefined : 'No motions yet. The user adds them with Pose → Motion → Import motion.' }; } },
@@ -964,6 +1101,7 @@ Cheat sheet (degrees):
 - Standing naturally: upperArm_L [0,0,-78], upperArm_R [0,0,78], elbows bent about 10.
 - Sitting on a 0.45 m seat: hips pos [0,-0.40,0], thighs x -88, shins x +84.
 LOOKS: a character can wear a look, a real human model. Its controls do not change: you still pose the mannequin bones above, with the same names and the same cheat sheet, and the model follows them. A character wearing a look has the model's proportions, so its arm, leg and seat heights differ a little from the numbers above; use get_rig and get_joint_positions when exact heights matter. Use list_looks and set_look to change what a character wears.
+LIGHTING AND MATERIALS, for photoreal renders (the viewport is a preview; the render server draws the real thing): light a scene like a film set. Pick an environment with set_lighting, then add lights with add_light: a key light (large area light to one side of the camera, above head height, aimed at the main character's head), a weaker fill from the other side, and a rim light behind and above to separate people from the background. For interiors turn the sun off (sun_power 0), use the "interior" or "studio" environment at ambient 0.3 to 0.6, and put warm area lights where real lamps would be. Give props a material preset (wood, leather, fabric, velvet, stone, brick, plaster, metal, paper, glass, plastic, ceramic, glow, neon) with add_prop or place: the renderer adds grain, pores, bumps and rounded edges; "glow" makes a prop shine like a lampshade and "neon" like a neon tube: put them in the background of a shot for depth. Use set_hands so held objects are gripped and resting hands are relaxed.
 MOTIONS: the user can import recorded movement (motion capture: walks, idles, dances). list_motions shows them and apply_motion keys one onto any character, retargeted to that body. Prefer a recorded motion over hand keys when one fits the request, then refine with set_keyframes: for example apply a walk with parts "lower" and pose the arms yourself, or layer an idle over a seated pose. Recorded motions are keyed every frame or two, so edit them by changing whole spans rather than single frames.
 Imported models that are not characters have their own bone names: call get_rig and work from each bone's rest direction.
 
@@ -977,7 +1115,7 @@ HOW TO WORK:
 - The app plays the result when you finish. Reply in one to three plain sentences: what you made, and one thing the user could ask to change. No markdown, no lists of keyframes.`;
 }
 export function stateBlock() {
-  const list = ents.slice(0, 40).map(e => e.kind === 'prop' ? `${e.name} (${e.params.shape} ${e.params.size.map(r2).join('x')} at ${e.pos.map(r2).join(',')})` : `${e.name} (${e.kind === 'mannequin' ? (e.params.look ? 'character wearing ' + e.params.lookName : 'mannequin') : 'imported model'} at ${e.pos.map(r2).join(',')} facing ${r1(e.rot[1])}${Object.keys(e.tracks).length ? ', animated' : ''})`);
+  const list = ents.slice(0, 40).map(e => isLight(e) ? `${e.name} (${e.params.type} light ${Math.round(e.params.power)} W at ${e.pos.map(r2).join(',')})` : e.kind === 'prop' ? `${e.name} (${e.params.shape} ${e.params.size.map(r2).join('x')}${e.params.mat && e.params.mat !== 'plain' ? ' ' + e.params.mat : ''} at ${e.pos.map(r2).join(',')})` : `${e.name} (${e.kind === 'mannequin' ? (e.params.look ? 'character wearing ' + e.params.lookName : 'mannequin') : 'imported model'} at ${e.pos.map(r2).join(',')} facing ${r1(e.rot[1])}${Object.keys(e.tracks).length ? ', animated' : ''})`);
   return `[app state: timeline ${anim.length} frames at ${anim.fps} fps, loop ${anim.loop ? 'on' : 'off'}, motion ${anim.ease}; current frame ${Math.round(frame)}; selected: ${active ? active.name + (sel ? ' / ' + sel.name : '') : 'nothing'}; camera keys: ${camKeys.length}; on stage: ${list.join('; ') || 'nothing'}]`;
 }
 export function beginAgentTurn(onAct) { turnUndo = false; turnMutated = false; wantPlay = null; wantShot = false; actHook = onAct || (() => {}); }

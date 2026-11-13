@@ -5,7 +5,7 @@
 //   SITE_DIR    a checkout of the Rigroom site (index.html, src/)
 //   STUDIO_DIR  a checkout of the studio with the models the scene uses (models/<hash>.glb)
 //   JOB_DIR     the job folder; job.json must have "scene". Writes scene.glb, and fills in
-//               cameras and height in job.json when they are missing.
+//               cameras and height in job.json when they are missing, and the scene's lights.
 // Environment: CHROME (path to Chrome), RIGROOM_LOCAL_LIBS (serve three.js from a local
 // node_modules folder instead of the CDN, for machines without internet access).
 import { chromium } from 'playwright-core';
@@ -59,7 +59,8 @@ try {
     const [f0, f1] = job.frames;
     if (!job.cameras || !job.cameras.length) { job.cameras = []; for (let f = f0; f <= f1; f++) job.cameras.push({ f, ...app.cameraAt(f) }); }
     if (!job.height) job.height = Math.round(job.width / app.frameAspect() / 2) * 2;
-    if (!job.look) job.look = { ...app.ctx.look };
+    job.look = { ...app.ctx.look, ...(job.look || {}) };
+    job.lights = app.lightList();
     app.applyFrame(f0);
     const buf = new Uint8Array(await app.exportGLB({ animated: job.kind === 'shot' }));
     let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));

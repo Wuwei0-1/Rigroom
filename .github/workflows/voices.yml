@@ -1,0 +1,185 @@
+# Rigroom voices: speaks a film's script with Chatterbox (text to speech) on GitHub's machines.
+#
+# The script and the voices live in the private studio repository (film/<id>/script.json,
+# film/<id>/voices.json, film/<id>/voices/<Character>.wav). This public repository only runs the
+# speaking: audio stays encrypted while it moves between machines and is written to
+# film/<id>/audio/ in the studio. Nothing from the studio is stored here.
+name: Voices
+
+on:
+  workflow_dispatch:
+    inputs:
+      film:
+        description: Film id (a folder under film/)
+        required: true
+      lines:
+        description: Lines to speak, like 1-9 (empty for all)
+        required: false
+        default: ''
+      parts:
+        description: How many machines share the lines
+        required: false
+        default: '4'
+
+permissions:
+  contents: read
+
+env:
+  FILM: ${{ inputs.film }}
+  ONLY: ${{ inputs.lines }}
+  STUDIO_REPO: ${{ vars.STUDIO_REPO || format('{0}-studio', github.repository) }}
+
+jobs:
+  voices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      parts: ${{ steps.plan.outputs.parts }}
+    steps:
+      - name: Check the request
+        env:
+          HAS_TOKEN: ${{ secrets.STUDIO_TOKEN != '' }}
+          PARTS: ${{ inputs.parts }}
+        run: |
+          [[ "$FILM" =~ ^[A-Za-z0-9_-]{1,60}$ ]] || { echo "Bad film id"; exit 1; }
+          [[ "$ONLY" =~ ^([0-9]+-[0-9]+)?$ ]] || { echo "Lines must look like 1-9"; exit 1; }
+          [[ "$PARTS" =~ ^[0-9]{1,2}$ ]] || { echo "Parts must be a number"; exit 1; }
+          [ "$HAS_TOKEN" = true ] || { echo "The STUDIO_TOKEN secret is missing"; exit 1; }
+      - id: plan
+        env:
+          PARTS: ${{ inputs.parts }}
+        run: echo "parts=$(python3 -c "n=max(1,min(16,int('$PARTS')));print([i+1 for i in range(n)])")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.STUDIO_REPO }}
+          token: ${{ secrets.STUDIO_TOKEN }}
+          path: data
+          filter: blob:none
+          sparse-checkout: film/${{ env.FILM }}/
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: app/film/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: speech-models-v1
+      - name: Install Chatterbox
+        run: pip install -q -r app/film/requirements.txt
+      - name: Make the voices
+        run: |
+          F="data/film/$FILM"; mkdir -p "$F/voices"
+          [ -f "$F/voices.json" ] || echo '{}' > "$F/voices.json"
+          python app/film/speak.py voices "$F/script.json" "$F/voices.json" "$F/voices" prompts > voices.log 2>&1 || { tail -30 voices.log; exit 1; }
+          grep -E "^\{|designed|recording|built-in" voices.log | tail -12
+      - name: Pack the voices
+        env:
+          KEY: ${{ secrets.STUDIO_TOKEN }}
+        run: |
+          cp "data/film/$FILM/script.json" "data/film/$FILM/voices.json" prompts/
+          tar -C prompts -cf - . | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:KEY -out voices.pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voices-${{ env.FILM }}
+          path: voices.pack
+          retention-days: 1
+
+  speak:
+    needs: voices
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: true
+      matrix:
+        part: ${{ fromJSON(needs.voices.outputs.parts) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/download-artifact@v4
+        with:
+          name: voices-${{ env.FILM }}
+      - name: Unpack the voices
+        env:
+          KEY: ${{ secrets.STUDIO_TOKEN }}
+        run: mkdir prompts && openssl enc -d -aes-256-cbc -pbkdf2 -pass env:KEY -in voices.pack | tar -C prompts -xf -
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: app/film/requirements.txt
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/huggingface
+          key: speech-models-v1
+      - name: Install Chatterbox
+        run: pip install -q -r app/film/requirements.txt
+      - name: Speak the lines
+        env:
+          PART: ${{ matrix.part }}
+          PARTS: ${{ inputs.parts }}
+        run: |
+          python app/film/speak.py lines prompts/script.json prompts/voices.json prompts spoken --part "$PART/$PARTS" ${ONLY:+--only "$ONLY"} > speak.log 2>&1 || { tail -30 speak.log; exit 1; }
+          grep -E "^line [0-9]+\.[0-9]+ [A-Za-z ]+: [0-9.]+ s" speak.log | sed -E 's/^(line [0-9.]+) [A-Za-z ]+:/\1:/'
+      - name: Pack the audio
+        env:
+          KEY: ${{ secrets.STUDIO_TOKEN }}
+        run: tar -C spoken -cf - . | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:KEY -out spoken.pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spoken-${{ env.FILM }}-${{ matrix.part }}
+          path: spoken.pack
+          retention-days: 1
+
+  publish:
+    needs: [voices, speak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.STUDIO_REPO }}
+          token: ${{ secrets.STUDIO_TOKEN }}
+          path: data
+          filter: blob:none
+          sparse-checkout: film/${{ env.FILM }}/
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-${{ env.FILM }}*'
+          path: packs
+      - name: Collect the audio
+        env:
+          KEY: ${{ secrets.STUDIO_TOKEN }}
+        run: |
+          command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
+          pip install -q numpy soundfile
+          F="data/film/$FILM"; mkdir -p prompts "$F/voices"
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:KEY -in "packs/voices-$FILM/voices.pack" | tar -C prompts -xf -
+          # a designed voice is kept, so the character sounds the same in every later run
+          for f in prompts/*.wav; do n=$(basename "$f"); [[ "$n" == _* ]] || [ -f "$F/voices/$n" ] || cp "$f" "$F/voices/$n"; done
+          cp prompts/voices_report.json "$F/voices/report.json"
+          for p in packs/spoken-*/spoken.pack; do d="parts/$(basename "$(dirname "$p")")"; mkdir -p "$d"; openssl enc -d -aes-256-cbc -pbkdf2 -pass env:KEY -in "$p" | tar -C "$d" -xf -; done
+          python app/film/finish_audio.py parts "$F"
+      - name: Commit the audio
+        working-directory: data
+        run: |
+          git config user.name "rigroom-voices"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --sparse "film/$FILM"
+          git diff --cached --quiet && { echo "Nothing new to commit"; exit 0; }
+          git commit -q -m "Voices for $FILM ${ONLY:+(lines $ONLY)}"
+          for try in 1 2 3 4; do
+            git pull -q --rebase origin main && git push -q origin HEAD:main && exit 0
+            sleep $((try * 5))
+          done
+          exit 1

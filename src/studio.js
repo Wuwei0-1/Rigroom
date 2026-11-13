@@ -110,9 +110,10 @@ function hideOffer() { offer = null; $('#syncBar').hidden = true; }
 
 /** Called before the saved scene is built: models it needs but this browser lacks come from the studio. */
 export function prepareStudio() {
-  setRemoteFetcher(async hash => (ready() ? readBytes(`models/${hash}.glb`) : null));
+  // a person that was replaced by a better copy is served as that copy
+  setRemoteFetcher(async hash => { if (!ready()) return null; const i = await loadIndex(), to = i[hash] && i[hash].replacedBy; return readBytes(`models/${to || hash}.glb`); });
   setNameLookup(async hash => { const i = await loadIndex(); return i[hash] && i[hash].name; });
-  setRemoteLister(async () => (ready() ? Object.entries(await loadIndex()).map(([hash, m]) => ({ hash, name: m.name || 'Model', size: m.size || 0, rigged: m.rigged })) : []));
+  setRemoteLister(async () => (ready() ? Object.entries(await loadIndex()).map(([hash, m]) => ({ hash, name: m.name || 'Model', size: m.size || 0, rigged: m.rigged, retired: !!m.retired })) : []));
   setMotionRemote({ index: async () => (ready() ? loadMotionIndex() : {}), fetch: async id => (ready() ? readText(`motions/${id}.json`) : null) });
 }
 export function initStudio() {
