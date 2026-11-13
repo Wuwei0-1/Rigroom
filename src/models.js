@@ -13,6 +13,8 @@ const LIBS = 'https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/libs/';
 const MAX_TEXTURE = 2048;   // tablets run out of GPU memory on 8K scan textures
 let renderer = null, gltfLoader = null;
 const cache = new Map();    // hash -> { name, bytes, template }
+let remoteFetch = null;     // fetches a model's bytes from the studio when this browser lacks it
+export function setRemoteFetcher(fn) { remoteFetch = fn; }
 
 export function initModels(r) { renderer = r; }
 let draco = null, ktx2 = null;
@@ -60,12 +62,21 @@ export async function preloadModels(hashes) {
   for (const hash of new Set(hashes)) {
     if (!hash || cache.has(hash)) continue;
     try {
-      const row = await idb('readonly', s => s.get(hash));
+      let row = null; try { row = await idb('readonly', s => s.get(hash)); } catch (e) { /* storage unavailable */ }
+      if (!row && remoteFetch) { const bytes = await remoteFetch(hash); if (bytes) { row = { hash, name: await remoteName(hash), bytes }; try { await idb('readwrite', s => s.put(row, hash)); } catch (e) { /* kept for this visit */ } } }
       if (!row) { missing.push(hash); continue; }
       cache.set(hash, { name: row.name, bytes: row.bytes, template: await parseGLB(row.bytes) });
     } catch (e) { missing.push(hash); }
   }
   return missing;
+}
+let nameLookup = null;
+export function setNameLookup(fn) { nameLookup = fn; }
+async function remoteName(hash) { try { return (nameLookup && await nameLookup(hash)) || 'Model'; } catch (e) { return 'Model'; } }
+/** Add a model that arrived as .glb bytes (from the studio or a tool). */
+export async function addModelBytes(hash, name, bytes) {
+  if (!cache.has(hash)) cache.set(hash, { name, bytes, template: await parseGLB(bytes) });
+  try { await idb('readwrite', s => s.put({ hash, name, bytes }, hash)); } catch (e) { /* kept for this visit */ }
 }
 /** A fresh copy of a stored model, or null if it is not loaded. */
 export function instantiate(hash) {
@@ -77,6 +88,14 @@ export function instantiate(hash) {
 export function modelBytes(hash) { const m = cache.get(hash); return m ? m.bytes : null; }
 
 /* ───────── loading from files ───────── */
+// "rp_eric_rigged_001_yup_t.fbx" becomes "Eric"; other names just lose their extension and underscores
+function niceName(file) {
+  let n = file.replace(/\.[^.]+$/, '');
+  const rp = n.match(/^rp_([a-z]+)_(?:rigged|animated|posed)_\d+/i);
+  if (rp) return rp[1][0].toUpperCase() + rp[1].slice(1);
+  n = n.replace(/_(?:[yz]up_[at]|\d+k)$/i, '').replace(/[_]+/g, ' ').trim();
+  return n || 'Model';
+}
 async function downscale(file) {
   // big scan textures are shrunk to MAX_TEXTURE on their long side; small ones pass through
   try {
@@ -100,7 +119,7 @@ function toStandard(m) {
 export async function importFiles(fileList) {
   const files = [...fileList], main = files.find(f => /\.(glb|gltf|fbx)$/i.test(f.name));
   if (!main) throw new Error('Pick a .glb, .gltf or .fbx file (with its texture images, if it has separate ones).');
-  const name = main.name.replace(/\.[^.]+$/, '');
+  const name = niceName(main.name);
   let bytes;
   if (/\.glb$/i.test(main.name)) {
     bytes = await main.arrayBuffer();
@@ -112,10 +131,10 @@ export async function importFiles(fileList) {
   else {
     // resolve the textures and buffers the model refers to by file name
     const urls = new Map();
-    for (const f of files) if (f !== main) { const blob = /\.(jpe?g|png|webp)$/i.test(f.name) ? await downscale(f) : f; urls.set(f.name.toLowerCase(), URL.createObjectURL(blob)); }
+    for (const f of files) if (f !== main) { const blob = /\.(jpe?g|png|webp)$/i.test(f.name) ? await downscale(f) : f; urls.set(f.name.split(/[\\/]/).pop().toLowerCase(), URL.createObjectURL(blob)); }
     let loading = 0, settle = null;
     const allLoaded = new Promise(r => { settle = r; });
-    const manager = new THREE.LoadingManager(() => { loading = 0; settle(); }, null, () => {});
+    const manager = new THREE.LoadingManager(() => { loading = 0; settle(); }, undefined, () => {});
     manager.onStart = () => { loading = 1; };
     manager.setURLModifier(u => { const base = decodeURIComponent(u.split(/[\\/]/).pop().split('?')[0]).toLowerCase(); return urls.get(base) || u; });
     let root;

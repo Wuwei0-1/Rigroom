@@ -9,8 +9,8 @@
 <title>Rigroom Animator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./src/ui.css?v=2026.11.13-1434">
-<script>window.RIGROOM_VERSION = "2026.11.13-1434";</script>
+<link rel="stylesheet" href="./src/ui.css?v=2026.11.13-1541">
+<script>window.RIGROOM_VERSION = "2026.11.13-1541";</script>
 <script type="importmap">
 {
   "imports": {
@@ -19,11 +19,13 @@
     "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/",
     "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.18/build/index.module.js",
     "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js",
-    "./src/app.js": "./src/app.js?v=2026.11.13-1434",
-    "./src/agent.js": "./src/agent.js?v=2026.11.13-1434",
-    "./src/trace.js": "./src/trace.js?v=2026.11.13-1434",
-    "./src/server.js": "./src/server.js?v=2026.11.13-1434",
-    "./src/models.js": "./src/models.js?v=2026.11.13-1434"
+    "./src/app.js": "./src/app.js?v=2026.11.13-1541",
+    "./src/agent.js": "./src/agent.js?v=2026.11.13-1541",
+    "./src/trace.js": "./src/trace.js?v=2026.11.13-1541",
+    "./src/server.js": "./src/server.js?v=2026.11.13-1541",
+    "./src/models.js": "./src/models.js?v=2026.11.13-1541",
+    "./src/github.js": "./src/github.js?v=2026.11.13-1541",
+    "./src/studio.js": "./src/studio.js?v=2026.11.13-1541"
   }
 }
 </script>
@@ -53,6 +55,7 @@
       <div class="overlay" id="hint">Tap a character or prop, then a joint. Rotate turns a bone, Reach drags a hand or foot to a spot, Place moves the whole thing.</div>
       <div id="renderBar" hidden><span id="renderMsg">Rendering…</span><progress id="renderProg" max="1" value="0"></progress><button class="btn" id="renderStop">Stop</button></div>
       <div id="toast" role="status"></div>
+      <div id="syncBar" hidden><span id="syncMsg">Your studio has a newer scene.</span><span class="row" style="flex-wrap:nowrap"><button class="btn primary" id="syncOpen">Open it</button><button class="btn" id="syncKeep">Keep mine</button></span></div>
       <div id="updateBar" hidden><span>A new version of Rigroom is ready.</span><button class="btn primary" id="updateBtn">Update now</button></div>
       <div id="resultView" hidden>
         <div id="resultMedia"></div>
@@ -188,6 +191,24 @@
           </div>
           <p class="note" id="renderNote">Path-traces the current frame through the shot camera with real light bounces, then saves a PNG. More samples means less grain and more time; start with 64 at 960 px to see how fast your tablet is.</p>
         </div>
+        <div class="group" id="studioGroup">
+          <h3>Studio</h3>
+          <p class="note" id="studioStatus">Not connected. Your scenes stay in this browser.</p>
+          <div class="row">
+            <button class="btn" id="studioSave">Save now</button>
+            <button class="btn" id="studioOpen">Open latest</button>
+          </div>
+          <details id="srvSetup">
+            <summary>Studio settings</summary>
+            <div class="group" style="padding-top:8px">
+              <div class="row"><label for="srvRepo">Studio</label><input type="text" id="srvRepo" placeholder="owner/Rigroom-studio" autocomplete="off"></div>
+              <div class="row"><label for="srvToken">GitHub token</label><input type="password" id="srvToken" autocomplete="off" placeholder="github_pat_…"></div>
+              <div class="row"><button class="btn" id="srvSave">Connect</button><button class="btn ghost" id="srvForget">Forget token</button></div>
+              <p class="note">Your scenes and the people in them save to this private repository automatically, and open on any device you connect. The token needs Contents and Actions, read and write, on this site's repository and the studio. It is stored only in this browser and sent only to api.github.com.</p>
+              <p class="note" id="siteNote"></p>
+            </div>
+          </details>
+        </div>
         <div class="group" id="serverGroup">
           <h3>Render server</h3>
           <div class="row"><label for="srvQuality">Quality</label>
@@ -200,15 +221,6 @@
           </div>
           <div id="srvJobs" class="list"></div>
           <p class="note" id="srvNote">Renders with Blender on GitHub's machines, for free. A frame takes a few minutes; a whole shot is split across many machines at once.</p>
-          <details id="srvSetup">
-            <summary>Server settings</summary>
-            <div class="group" style="padding-top:8px">
-              <div class="row"><label for="srvRepo">Repository</label><input type="text" id="srvRepo" placeholder="owner/repository" autocomplete="off"></div>
-              <div class="row"><label for="srvToken">GitHub token</label><input type="password" id="srvToken" autocomplete="off" placeholder="github_pat_…"></div>
-              <div class="row"><button class="btn" id="srvSave">Save</button><button class="btn ghost" id="srvForget">Forget token</button></div>
-              <p class="note">Make a fine-grained token at github.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens. Repository access: only this repository. Permissions: Contents read and write, Actions read and write. The token is stored only in this browser and sent only to api.github.com.</p>
-            </div>
-          </details>
         </div>
         <div class="group">
           <h3>Reference image</h3>
@@ -260,6 +272,6 @@
 <script>
 window.addEventListener('error',e=>{ const h=document.getElementById('hint'); if(h&&/import|module|three/i.test(String(e.message))) h.textContent='The 3D library did not load. Check the connection and reload.'; });
 </script>
-<script type="module" src="./src/main.js?v=2026.11.13-1434"></script>
+<script type="module" src="./src/main.js?v=2026.11.13-1541"></script>
 </body>
 </html>

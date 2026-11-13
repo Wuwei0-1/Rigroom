@@ -197,7 +197,7 @@ export function swapLook(e, hash, name) {
     fitModel(obj, map); fit = measureFit(map, v => v);
   }
   const oldHipY = (e.params.fit && e.params.fit.hipY) || .96, newHipY = fit ? fit.hipY : .96;
-  const spec = sceneJSON(true), s = spec.ents.find(x => x.id === e.id);
+  const spec = JSON.parse(JSON.stringify(sceneJSON(true))), s = spec.ents.find(x => x.id === e.id);
   s.params = { ...s.params }; delete s.params.look; delete s.params.lookName; delete s.params.fit;
   if (hash) { s.params.look = hash; s.params.lookName = name || cachedName(hash) || 'Model'; s.params.fit = fit; }
   // hips heights move with the new body, so poses keep their offsets from standing height
@@ -342,7 +342,7 @@ function restEnt(e) { for (const b of e.bones) { b.obj.quaternion.copy(b.restQ);
 
 /* scene <-> JSON */
 function specOf(e) { return { id: e.id, kind: e.kind, name: e.name, params: e.params, pos: e.pos, rot: e.rot, scale: e.scale, tracks: e.tracks }; }
-export function sceneJSON(withImports) { return { app: 'rigroom', v: 3, fps: anim.fps, length: anim.length, loop: anim.loop, ease: anim.ease, cam: camKeys, look: { ...look }, ref: ref.kind === 'sketch' ? 'sketch' : null, ents: ents.filter(e => withImports || e.kind !== 'import' || e.params.model).map(specOf) }; }
+export function sceneJSON(withImports) { return { app: 'rigroom', v: 3, fps: anim.fps, length: anim.length, loop: anim.loop, ease: anim.ease, cam: camKeys.map(k => ({ ...k, p: [...k.p], t: [...k.t] })), look: { ...look }, ref: ref.kind === 'sketch' ? 'sketch' : null, ents: ents.filter(e => withImports || e.kind !== 'import' || e.params.model).map(specOf) }; }
 function cleanTracks(e, tracks) { const out = {};
   for (const [name, tr] of Object.entries(tracks || {})) { if (!e.byName.has(name) || !Array.isArray(tr)) continue;
     const t = tr.filter(k => k && Array.isArray(k.q) && k.q.length === 4 && isFinite(k.f)).map(k => ({ f: Math.round(k.f), q: k.q.map(Number), p: Array.isArray(k.p) ? k.p.map(Number) : null })).sort((a, b) => a.f - b.f);
@@ -383,9 +383,11 @@ function updateUndoUI() { $('#undo').disabled = !undoStack.length; $('#redo').di
 $('#undo').onclick = () => { if (!undoStack.length) return; pause(); redoStack.push(snapshot()); restoreSnap(undoStack.pop()); updateUndoUI(); };
 $('#redo').onclick = () => { if (!redoStack.length) return; pause(); undoStack.push(snapshot()); restoreSnap(redoStack.pop()); updateUndoUI(); };
 
-let saveTimer = null;
+let saveTimer = null, changeHook = null;
+export function onSceneChange(fn) { changeHook = fn; }
 export function changed() {
   drawTimeline(); markKeyed(); refreshSliders(); refreshHeader();
+  if (changeHook) { try { changeHook(); } catch (e) { /* sync is best effort */ } }
   clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem('rigroom.v3', JSON.stringify(sceneJSON(false))); } catch (e) { /* storage unavailable */ } }, 700);
 }
 export function loadSceneObject(o) {

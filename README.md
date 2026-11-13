@@ -32,20 +32,27 @@ Scanned people come two ways. **Rigged** scans have a skeleton and can be a look
 
 Where to get models: Mixamo characters (free with an Adobe account), Renderpeople's free rigged scanned people, Character Creator, or any rigged humanoid you have the rights to use. Check each model's licence before publishing renders.
 
+## Studio
+
+The studio is a private repository (by default `<this repository>-studio`, for example `Wuwei0-1/Rigroom-studio`) that holds your scenes, the people and models they use, render jobs and finished renders. Keep it private: licensed models must not be shared publicly.
+
+Connect it once per device under Project → Studio → Studio settings, with a fine-grained token that has **Contents: Read and write** and **Actions: Read and write** on both this repository and the studio.
+
+- The scene saves to `scenes/current.json` a few seconds after each change, and when the app goes to the background.
+- People and models a scene uses are uploaded once to `models/<fingerprint>.glb` and downloaded by any device that opens the scene.
+- When the studio has a newer scene than this device (saved on another device, or by Claude), the app opens it, or asks first if this device has unsaved work.
+
 ## Render server
 
-Project → Render server sends the scene to GitHub Actions, where Blender Cycles renders it on GitHub's machines. Public repositories get these machines free. A frame comes back as a PNG; a shot is split across up to 16 machines at once and comes back as an MP4.
+Project → Render server renders the scene with Blender Cycles on GitHub's machines, which are free for this public repository. A job is a small description written to the studio (`jobs/<id>/job.json`): the scene, the frames, the camera and the quality. The workflow rebuilds the scene from it with the app itself in headless Chrome (`render/export_scene.mjs`), using the people stored in the studio, renders it, and writes the result to `out/<id>/` in the studio. A shot is split across up to 16 machines at once and comes back as an MP4. Frames are encrypted while they move between machines, so nothing from the studio is left in this public repository.
 
-Set it up once:
+The workflow needs one secret in this repository: **STUDIO_TOKEN**, a token with Contents read and write on the studio.
 
-1. Make a fine-grained token: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.
-   - Repository access: **Only select repositories** → this repository.
-   - Permissions: **Contents: Read and write**, **Actions: Read and write**.
-2. In Rigroom, open Project → Render server → Server settings, check the repository name, paste the token, Save.
+To render from outside the app (for example from a Claude chat): `python3 tools/studio_job.py STUDIO_DIR still 0 --quality good`, commit and push the job to the studio, then start the workflow with inputs `job=<id>` and `store=studio`.
 
-Jobs and results are stored on the `renders` branch (see its README), not on `main`, so the website is not rebuilt for every render. The token is stored only in the browser and sent only to `api.github.com`; never commit it.
+The token is stored only in the browser and sent only to `api.github.com`; never commit it.
 
-Pushing changes to `render/` or the workflow re-renders a small self-test job, so a broken render setup shows up in the Actions tab.
+Pushing changes to `render/` or the workflow re-renders a small mannequin-only self-test job from this repository's `renders` branch, so a broken render setup shows up in the Actions tab.
 
 ## What it does
 
@@ -67,6 +74,8 @@ src/app.js        viewport, stage, posing, timeline, agent tools
 src/agent.js      Claude API tool-use loop
 src/trace.js      path-traced still render in the browser (loaded on first use)
 src/server.js     render server: sends jobs to GitHub Actions and fetches results
+src/github.js     GitHub access: the token, the studio, commits
+src/studio.js     studio sync: saving and opening scenes and their models
 src/models.js     human models: loading, fitting, skeleton matching, browser storage
 render/           Blender render script and frame planner run by the workflow
 .github/workflows/render.yml   the render server itself
