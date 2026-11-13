@@ -102,7 +102,13 @@ export async function importFiles(fileList) {
   if (!main) throw new Error('Pick a .glb, .gltf or .fbx file (with its texture images, if it has separate ones).');
   const name = main.name.replace(/\.[^.]+$/, '');
   let bytes;
-  if (/\.glb$/i.test(main.name)) bytes = await main.arrayBuffer();
+  if (/\.glb$/i.test(main.name)) {
+    bytes = await main.arrayBuffer();
+    // scans often carry 4K or 8K textures; re-pack them at a size a tablet can hold
+    const scene = await parseGLB(bytes); let big = 0;
+    scene.traverse(o => { if (!o.isMesh) return; for (const m of [].concat(o.material)) for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap']) { const im = m && m[k] && m[k].image; if (im && Math.max(im.width || 0, im.height || 0) > MAX_TEXTURE) big++; } });
+    if (big) { scene.animations = []; bytes = await new GLTFExporter().parseAsync(scene, { binary: true, maxTextureSize: MAX_TEXTURE }); }
+  }
   else {
     // resolve the textures and buffers the model refers to by file name
     const urls = new Map();

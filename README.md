@@ -28,6 +28,8 @@ Any character can wear a look: a rigged human model. Select the character, then 
 - Large scan textures are reduced to 2048 px so a tablet can hold several people at once.
 - `.glb` export, the render server and the in-browser render all use the real models.
 
+Scanned people come two ways. **Rigged** scans have a skeleton and can be a look. **Posed** scans (such as Renderpeople's Posed People) are frozen in one pose with no skeleton: import them with Stage → Import model and stand them in the scene as extras. Pick the 100k version of a scan on a tablet.
+
 Where to get models: Mixamo characters (free with an Adobe account), Renderpeople's free rigged scanned people, Character Creator, or any rigged humanoid you have the rights to use. Check each model's licence before publishing renders.
 
 ## Render server
@@ -70,6 +72,10 @@ render/           Blender render script and frame planner run by the workflow
 .github/workflows/render.yml   the render server itself
 assets/sketch.jpg reference sketch for the booth scene
 ```
+
+## Updates
+
+Every release stamps a version (`python3 tools/bump_version.py`) into `index.html`, `version.json` and the URL of each app file, so browsers never mix old and new files. A running copy checks `version.json` when it opens or comes back to the foreground and offers **Update now**. The current version is shown under Project.
 
 ## Run it locally
 

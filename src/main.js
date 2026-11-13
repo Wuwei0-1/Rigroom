@@ -65,5 +65,18 @@ app.start(() => {
   else addMsg('agent', 'Your last scene is back on stage. Tell me what to change.');
 });
 
+// updates: a home-screen app can keep running an old copy for days, so check for a newer release
+const VERSION = window.RIGROOM_VERSION || '0';
+document.querySelector('#versionNote').textContent = 'Rigroom version ' + VERSION + '.';
+async function checkForUpdate() {
+  try {
+    const r = await fetch('./version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+    const { version } = await r.json();
+    if (version && version !== VERSION && VERSION !== '0') { document.querySelector('#updateBar').hidden = false; document.querySelector('#updateBtn').onclick = () => location.replace(location.pathname + '?v=' + encodeURIComponent(version)); }
+  } catch (e) { /* offline */ }
+}
+checkForUpdate(); setInterval(checkForUpdate, 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
+
 // test hook for automated checks; harmless in normal use
 window.__rigroom = { app, buildBooth };

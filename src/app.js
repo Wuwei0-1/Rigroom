@@ -250,7 +250,8 @@ export async function importModel(files, asLook) {
   const e = makeEnt({ kind: 'import', name: uniqueName(res.name || 'Model'), params: { model: res.hash, file: res.name } });
   if (e.missing || !e.bones.length) { stage.remove(e.group); undoStack.pop(); updateUndoUI(); return toast('That file has nothing to show.', true); }
   e.pos = [0, 0, 1.2]; applyPlacement(e); ents.push(e); setActive(e); changed(); refreshStageUI();
-  toast('Loaded ' + res.name + '. To dress a character in it instead, select the character and use Look → Real model.');
+  const rigged = e.bones.length > 1 && e.group.getObjectByProperty('isSkinnedMesh', true);
+  toast('Loaded ' + res.name + '. ' + (rigged ? 'To dress a character in it instead, select the character and use Look → Real model.' : 'It has no skeleton, so it stays in its scanned pose: use Place to stand it where you want.'));
 }
 export function loadGLB(buf, fileName) { return importModel([new File([buf], fileName.replace(/\.[^.]+$/, '') + '.glb')], false); }
 /* rotation convention shared by the sliders and the agent:
@@ -500,17 +501,25 @@ $('#restPose').onclick = () => { if (!active) return; pushUndo(); pause(); restE
 
 /* stage pane */
 function refreshHeader() { const c = ents.filter(e => e.kind !== 'prop').length, p = ents.length - c; $('#rigName').textContent = c + ' character' + (c === 1 ? '' : 's') + ' · ' + p + ' prop' + (p === 1 ? '' : 's'); }
+function refreshLookUI() {
+  const isChar = !!active && active.kind === 'mannequin', looked = isChar && !!active.params.look;
+  $('#lookReal').disabled = !isChar; $('#lookMannequin').disabled = !looked;
+  $('#lookName').textContent = !isChar ? (active ? active.name + ' is not a character.' : 'Nothing selected.')
+    : active.name + ': ' + (looked ? active.params.lookName + (active.lookMissing ? ' (not on this device, so the mannequin stands in)' : '') : 'mannequin');
+  $('#lookNote').textContent = isChar ? 'Real model… dresses ' + active.name + ' in a rigged human model (.glb, or .fbx picked with its textures). Poses, animation and the agent keep working.'
+    : 'Select a character to change how they look: tap them in the viewport or in the list above.';
+}
 export function refreshStageUI() {
   const list = $('#entList'); list.textContent = '';
   for (const e of ents) { const el = document.createElement('button'); el.className = 'item' + (e === active ? ' on' : '') + (Object.keys(e.tracks).length ? ' keyed' : '');
     const sm = document.createElement('small'); sm.textContent = e.kind === 'prop' ? e.params.shape : (e.kind === 'import' ? 'model' : 'character');
     el.append(document.createElement('i'), document.createTextNode(e.name), sm); el.onclick = () => { setActive(e); if (e.bones.length === 1) select(e.bones[0]); }; list.append(el); }
+  refreshLookUI();
   const ed = $('#entEdit'); ed.style.display = active ? 'flex' : 'none'; if (!active) return;
   $('#entName').value = active.name; $('#entFacing').value = Math.round(active.rot[1]); $('#entFacingV').textContent = Math.round(active.rot[1]) + '°';
   $('#entSize').value = Math.round(active.scale * 100); $('#entSizeV').textContent = Math.round(active.scale * 100) + '%';
   const isProp = active.kind === 'prop', isChar = active.kind === 'mannequin', looked = isChar && !!active.params.look, hasMat = isChar ? !looked : active.kind !== 'import';
-  for (const id of ['lookRow', 'lookRow2', 'lookNote']) $('#' + id).style.display = isChar ? 'flex' : 'none';
-  if (isChar) { $('#lookName').textContent = looked ? active.params.lookName + (active.lookMissing ? ' (not on this device; showing the mannequin)' : '') : 'Mannequin'; $('#lookMannequin').disabled = !looked; }
+  refreshLookUI();
   $('#propSizeRow').style.display = isProp ? 'flex' : 'none'; for (const id of ['colorRow', 'matRow', 'matRow2']) $('#' + id).style.display = hasMat ? 'flex' : 'none';
   if (isProp) ['pw', 'ph', 'pd'].forEach((id, i) => $('#' + id).value = active.params.size[i]);
   if (hasMat) { $('#entColor').value = active.params.color; $('#matRough').value = Math.round(active.params.rough * 100); $('#matRoughV').textContent = Math.round(active.params.rough * 100) + '%'; $('#matMetal').value = Math.round(active.params.metal * 100); $('#matMetalV').textContent = Math.round(active.params.metal * 100) + '%'; }

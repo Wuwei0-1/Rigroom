@@ -121,3 +121,5 @@ footer{background:var(--panel);border-top:1px solid var(--line);padding:8px 12px
 .pill.done{border-color:#7cc492;color:#7cc492}
 .pill.bad{border-color:var(--bad);color:var(--bad)}
 .job .btn{min-height:32px;padding:0 10px}
+#updateBar{position:absolute;left:10px;right:10px;bottom:10px;z-index:9;display:flex;gap:10px;align-items:center;justify-content:space-between;background:rgba(20,22,26,.96);border:1px solid var(--play);border-radius:8px;padding:8px 12px}
+#updateBar[hidden]{display:none}
