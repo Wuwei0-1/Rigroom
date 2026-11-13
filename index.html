@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1f2126">
+<title>Rigroom Animator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./src/ui.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.18/build/index.module.js",
+    "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">Rig<b>room</b></div>
+    <div id="rigName"></div>
+    <button class="btn ghost" id="undo" aria-label="Undo">Undo</button>
+    <button class="btn ghost hide-narrow" id="redo" aria-label="Redo">Redo</button>
+    <button class="btn" id="sideToggle" aria-expanded="true">Panel</button>
+  </header>
+
+  <main>
+    <section id="view" aria-label="3D viewport">
+      <div id="frame"><img id="ref" alt=""></div>
+      <div class="overlay" id="ovTop">
+        <div class="seg" role="group" aria-label="Gizmo mode">
+          <button id="mode-rotate" class="on">Rotate</button>
+          <button id="mode-move">Move</button>
+          <button id="mode-reach">Reach</button>
+          <button id="mode-place">Place</button>
+        </div>
+        <div id="selChip" class="none">Nothing selected</div>
+      </div>
+      <div class="overlay" id="hint">Tap a character or prop, then a joint. Rotate turns a bone, Reach drags a hand or foot to a spot, Place moves the whole thing.</div>
+      <div id="renderBar" hidden><span id="renderMsg">Rendering…</span><progress id="renderProg" max="1" value="0"></progress><button class="btn" id="renderStop">Stop</button></div>
+      <div id="toast" role="status"></div>
+    </section>
+
+    <aside id="side">
+      <div class="tabs" role="tablist">
+        <button data-tab="agent" class="on">Agent</button>
+        <button data-tab="pose">Pose</button>
+        <button data-tab="stage">Stage</button>
+        <button data-tab="project">Project</button>
+      </div>
+
+      <div class="pane on" id="pane-agent">
+        <div id="log"></div>
+        <div id="chips">
+          <button class="chip">Everyone turns to look at Rosa</button>
+          <button class="chip">Make Victor wave at the table</button>
+          <button class="chip">Put a cup on the table and have Bram reach for it</button>
+          <button class="chip">Ines lowers the paper and nods</button>
+        </div>
+        <details id="agentSetup">
+          <summary>Agent settings</summary>
+          <div class="group" style="padding-top:8px">
+            <div class="row"><label for="apiKey">API key</label><input type="password" id="apiKey" autocomplete="off" placeholder="sk-ant-…"></div>
+            <div class="row"><label for="model">Model</label>
+              <select id="model">
+                <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (fast)</option>
+                <option value="claude-opus-5-5">Claude Opus 5.5</option>
+                <option value="claude-haiku-5-5">Claude Haiku 5.5 (cheapest)</option>
+              </select></div>
+            <div class="row"><button class="btn" id="saveKey">Save</button><button class="btn ghost" id="forgetKey">Forget key</button></div>
+            <p class="note">The key is stored only in this browser and sent only to api.anthropic.com. Get one at console.anthropic.com.</p>
+          </div>
+        </details>
+        <form id="composer">
+          <textarea id="prompt" placeholder="Describe a motion, a pose or a change to the stage…" aria-label="Message the agent"></textarea>
+          <button class="btn primary" id="send" type="submit">Send</button>
+        </form>
+      </div>
+
+      <div class="pane" id="pane-pose">
+        <div class="group">
+          <h3>Selected bone</h3>
+          <div class="row"><label for="rx">X</label><input type="range" id="rx" min="-180" max="180" step="1" value="0"><span class="val" id="rxv">0°</span></div>
+          <div class="row"><label for="ry">Y</label><input type="range" id="ry" min="-180" max="180" step="1" value="0"><span class="val" id="ryv">0°</span></div>
+          <div class="row"><label for="rz">Z</label><input type="range" id="rz" min="-180" max="180" step="1" value="0"><span class="val" id="rzv">0°</span></div>
+          <div class="row">
+            <button class="btn" id="pinBtn">Pin in place</button>
+            <button class="btn" id="resetBone">Reset bone</button>
+            <button class="btn" id="restPose">Rest pose</button>
+          </div>
+          <p class="note">A pinned hand or foot stays where it is while you pose the rest of the body.</p>
+        </div>
+        <div class="group">
+          <h3>Skeleton</h3>
+          <div id="boneList" class="list"></div>
+        </div>
+      </div>
+
+      <div class="pane" id="pane-stage">
+        <div class="group">
+          <h3>On stage</h3>
+          <div id="entList" class="list"></div>
+          <div class="row">
+            <button class="btn" id="addChar">+ Character</button>
+            <button class="btn" id="addBox">+ Box</button>
+            <button class="btn" id="addCyl">+ Cylinder</button>
+            <button class="btn" id="importBtn">Import .glb</button>
+          </div>
+        </div>
+        <div class="group" id="entEdit">
+          <h3>Selected</h3>
+          <div class="row"><label for="entName">Name</label><input type="text" id="entName" maxlength="40"></div>
+          <div class="row"><label for="entFacing">Facing</label><input type="range" id="entFacing" min="-180" max="180" step="1" value="0"><span class="val" id="entFacingV">0°</span></div>
+          <div class="row"><label for="entSize">Scale</label><input type="range" id="entSize" min="40" max="200" step="1" value="100"><span class="val" id="entSizeV">100%</span></div>
+          <div class="row" id="propSizeRow"><label for="pw">W H D</label><input type="number" id="pw" step="0.05" min="0.01"><input type="number" id="ph" step="0.05" min="0.01"><input type="number" id="pd" step="0.05" min="0.01"></div>
+          <div class="row" id="colorRow"><label for="entColor">Color</label><input type="color" id="entColor"></div>
+          <div class="row" id="matRow"><label for="matRough">Rough</label><input type="range" id="matRough" min="0" max="100" value="80"><span class="val" id="matRoughV">80%</span></div>
+          <div class="row" id="matRow2"><label for="matMetal">Metal</label><input type="range" id="matMetal" min="0" max="100" value="0"><span class="val" id="matMetalV">0%</span></div>
+          <div class="row">
+            <button class="btn" id="dupEnt">Duplicate</button>
+            <button class="btn" id="delEnt">Delete</button>
+          </div>
+          <p class="note">Use Place in the viewport to move it. Imported models need a skeleton; Draco-compressed files are not supported yet.</p>
+        </div>
+        <input type="file" id="fileGlb" hidden>
+      </div>
+
+      <div class="pane" id="pane-project">
+        <div class="group">
+          <h3>Timeline</h3>
+          <div class="row"><label for="len">Frames</label><input type="number" id="len" min="1" max="2000" value="48"><label for="fps" style="min-width:0">FPS</label><input type="number" id="fps" min="1" max="60" value="24"></div>
+          <div class="row"><label for="ease">Motion</label>
+            <select id="ease"><option value="spline">Smooth curve</option><option value="ease">Pose to pose</option><option value="linear">Linear</option></select>
+            <label for="loop" style="min-width:0">Loop</label><input type="checkbox" id="loop" checked></div>
+        </div>
+        <div class="group">
+          <h3>Shot camera</h3>
+          <div class="row"><label for="shotView">Shot view</label><input type="checkbox" id="shotView"><label for="showBones" style="min-width:0">Joints</label><input type="checkbox" id="showBones" checked></div>
+          <div class="row"><label for="lens">Lens</label><input type="range" id="lens" min="15" max="75" step="1" value="35"><span class="val" id="lensV">35°</span></div>
+          <div class="row">
+            <button class="btn" id="keyCam">Key camera</button>
+            <button class="btn" id="delCam">Delete camera key</button>
+          </div>
+          <p class="note">Frame the view, then Key camera. Shot view looks through the keyed camera and locks the frame shape.</p>
+        </div>
+        <div class="group">
+          <h3>Look</h3>
+          <div class="row"><label for="exposure">Exposure</label><input type="range" id="exposure" min="20" max="200" value="100"><span class="val" id="exposureV">1.00</span></div>
+          <div class="row"><label for="sunAngle">Sun</label><input type="range" id="sunAngle" min="-180" max="180" value="35"><span class="val" id="sunAngleV">35°</span></div>
+          <div class="row"><label for="sunHeight">Height</label><input type="range" id="sunHeight" min="5" max="85" value="55"><span class="val" id="sunHeightV">55°</span></div>
+          <div class="row"><label for="sunPower">Sun power</label><input type="range" id="sunPower" min="0" max="300" value="200"><span class="val" id="sunPowerV">2.0</span></div>
+          <div class="row"><label for="envPower">Ambient</label><input type="range" id="envPower" min="0" max="200" value="60"><span class="val" id="envPowerV">0.6</span></div>
+        </div>
+        <div class="group">
+          <h3>Photoreal render</h3>
+          <div class="row"><label for="rSamples">Samples</label><input type="number" id="rSamples" min="4" max="4000" value="64"><label for="rSize" style="min-width:0">Width</label><select id="rSize"><option value="960">960 px</option><option value="1280" selected>1280 px</option><option value="1920">1920 px</option></select></div>
+          <div class="row">
+            <button class="btn" id="renderStill">Render this frame</button>
+          </div>
+          <p class="note" id="renderNote">Path-traces the current frame through the shot camera with real light bounces, then saves a PNG. More samples means less grain and more time; start with 64 at 960 px to see how fast your tablet is.</p>
+        </div>
+        <div class="group">
+          <h3>Reference image</h3>
+          <div class="row"><label for="refOp">Opacity</label><input type="range" id="refOp" min="0" max="100" step="1" value="35"><span class="val" id="refOpV">35%</span></div>
+          <div class="row">
+            <button class="btn" id="refLoad">Load image</button>
+            <button class="btn" id="refClear">Remove</button>
+          </div>
+          <p class="note" id="refNote">Shown over the scene in Shot view, so you can pose against a drawing.</p>
+          <input type="file" id="fileRef" accept="image/*" hidden>
+        </div>
+        <div class="group">
+          <h3>Project</h3>
+          <div class="row">
+            <button class="btn" id="saveBtn">Save project</button>
+            <button class="btn" id="openBtn">Open project</button>
+          </div>
+          <div class="row">
+            <button class="btn" id="glbBtn">Export .glb</button>
+            <button class="btn" id="videoBtn">Render video</button>
+          </div>
+          <div class="row">
+            <button class="btn" id="boothBtn">Load booth scene</button>
+            <button class="btn" id="emptyBtn">Empty stage</button>
+          </div>
+          <p class="note" id="projNote">The exported .glb carries the whole scene with its animation and opens in desktop Blender. Imported models are not stored in the project file.</p>
+          <input type="file" id="fileProj" accept=".json,application/json" hidden>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <div id="transport">
+      <button class="btn" id="prevKey" aria-label="Previous keyframe"><svg viewBox="0 0 16 16"><path d="M3 2h2v12H3zM14 2v12L6 8z"/></svg></button>
+      <button class="btn primary" id="play" aria-label="Play"><svg viewBox="0 0 16 16" id="playIcon"><path d="M4 2l10 6-10 6z"/></svg></button>
+      <button class="btn" id="nextKey" aria-label="Next keyframe"><svg viewBox="0 0 16 16"><path d="M11 2h2v12h-2zM2 2l8 6-8 6z"/></svg></button>
+      <div id="frameBox"><b id="frameNow">000</b> / <span id="frameLen">48</span></div>
+      <button class="btn" id="keyBtn">◆ Key</button>
+      <button class="btn hide-narrow" id="keyAll">Key pose</button>
+      <button class="btn" id="delKey">Delete key</button>
+      <span class="spacer"></span>
+      <button class="btn on" id="autoKey" aria-pressed="true">Auto-key</button>
+    </div>
+    <canvas id="tl" aria-label="Timeline"></canvas>
+  </footer>
+</div>
+<script>
+window.addEventListener('error',e=>{ const h=document.getElementById('hint'); if(h&&/import|module|three/i.test(String(e.message))) h.textContent='The 3D library did not load. Check the connection and reload.'; });
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
