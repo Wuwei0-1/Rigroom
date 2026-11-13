@@ -47,6 +47,10 @@
       <div class="overlay" id="hint">Tap a character or prop, then a joint. Rotate turns a bone, Reach drags a hand or foot to a spot, Place moves the whole thing.</div>
       <div id="renderBar" hidden><span id="renderMsg">Rendering…</span><progress id="renderProg" max="1" value="0"></progress><button class="btn" id="renderStop">Stop</button></div>
       <div id="toast" role="status"></div>
+      <div id="resultView" hidden>
+        <div id="resultMedia"></div>
+        <div class="row"><span id="resultCap" class="note"></span><span class="spacer"></span><button class="btn" id="resultSave">Save</button><button class="btn primary" id="resultClose">Close</button></div>
+      </div>
     </section>
 
     <aside id="side">
@@ -166,6 +170,28 @@
             <button class="btn" id="renderStill">Render this frame</button>
           </div>
           <p class="note" id="renderNote">Path-traces the current frame through the shot camera with real light bounces, then saves a PNG. More samples means less grain and more time; start with 64 at 960 px to see how fast your tablet is.</p>
+        </div>
+        <div class="group" id="serverGroup">
+          <h3>Render server</h3>
+          <div class="row"><label for="srvQuality">Quality</label>
+            <select id="srvQuality"><option value="draft">Draft · 960 px</option><option value="good" selected>Good · 1280 px</option><option value="final">Final · 1920 px</option></select></div>
+          <div class="row"><label for="srvDof">Focus blur</label><input type="checkbox" id="srvDof">
+            <select id="srvFstop" aria-label="Aperture"><option value="1.4">f/1.4</option><option value="2.8" selected>f/2.8</option><option value="5.6">f/5.6</option></select></div>
+          <div class="row">
+            <button class="btn" id="srvStill">Render frame</button>
+            <button class="btn" id="srvShot">Render shot</button>
+          </div>
+          <div id="srvJobs" class="list"></div>
+          <p class="note" id="srvNote">Renders with Blender on GitHub's machines, for free. A frame takes a few minutes; a whole shot is split across many machines at once.</p>
+          <details id="srvSetup">
+            <summary>Server settings</summary>
+            <div class="group" style="padding-top:8px">
+              <div class="row"><label for="srvRepo">Repository</label><input type="text" id="srvRepo" placeholder="owner/repository" autocomplete="off"></div>
+              <div class="row"><label for="srvToken">GitHub token</label><input type="password" id="srvToken" autocomplete="off" placeholder="github_pat_…"></div>
+              <div class="row"><button class="btn" id="srvSave">Save</button><button class="btn ghost" id="srvForget">Forget token</button></div>
+              <p class="note">Make a fine-grained token at github.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens. Repository access: only this repository. Permissions: Contents read and write, Actions read and write. The token is stored only in this browser and sent only to api.github.com.</p>
+            </div>
+          </details>
         </div>
         <div class="group">
           <h3>Reference image</h3>

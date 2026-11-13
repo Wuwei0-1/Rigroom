@@ -19,6 +19,21 @@ The Agent tab talks to the Claude API directly from your browser. Open **Agent s
 - **Never commit a key to this repository.** The site is public; each person who uses the agent enters their own key.
 - Usage is billed to the key's account.
 
+## Render server
+
+Project → Render server sends the scene to GitHub Actions, where Blender Cycles renders it on GitHub's machines. Public repositories get these machines free. A frame comes back as a PNG; a shot is split across up to 16 machines at once and comes back as an MP4.
+
+Set it up once:
+
+1. Make a fine-grained token: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.
+   - Repository access: **Only select repositories** → this repository.
+   - Permissions: **Contents: Read and write**, **Actions: Read and write**.
+2. In Rigroom, open Project → Render server → Server settings, check the repository name, paste the token, Save.
+
+Jobs and results are stored on the `renders` branch (see its README), not on `main`, so the website is not rebuilt for every render. The token is stored only in the browser and sent only to `api.github.com`; never commit it.
+
+Pushing changes to `render/` or the workflow re-renders a small self-test job, so a broken render setup shows up in the Actions tab.
+
 ## What it does
 
 - **Stage:** characters (a built-in mannequin, or rigged `.glb` models you import) and props, each with position, facing, scale, color, roughness and metalness.
@@ -37,7 +52,10 @@ src/ui.css        styles
 src/main.js       entry point and the opening booth scene
 src/app.js        viewport, stage, posing, timeline, agent tools
 src/agent.js      Claude API tool-use loop
-src/trace.js      path-traced still render (loaded on first use)
+src/trace.js      path-traced still render in the browser (loaded on first use)
+src/server.js     render server: sends jobs to GitHub Actions and fetches results
+render/           Blender render script and frame planner run by the workflow
+.github/workflows/render.yml   the render server itself
 assets/sketch.jpg reference sketch for the booth scene
 ```
 

@@ -1,0 +1,125 @@
+# Rigroom render server: renders a job sent by the app with Blender Cycles on GitHub's machines.
+# The app uploads jobs/<id>/scene.glb and job.json to the "renders" branch, then starts this
+# workflow. Frames are split across parallel runners; the result is committed to out/<id>/.
+name: Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Job id (a folder under jobs/ on the renders branch)
+        required: true
+  # a change to the render code re-renders the self-test job on the renders branch
+  push:
+    branches: [main]
+    paths:
+      - 'render/**'
+      - '.github/workflows/render.yml'
+
+permissions:
+  contents: write
+
+env:
+  JOB: ${{ inputs.job || 'selftest' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      chunks: ${{ steps.plan.outputs.chunks }}
+    steps:
+      - name: Check the job id
+        run: '[[ "$JOB" =~ ^[A-Za-z0-9_-]{1,80}$ ]] || { echo "Bad job id"; exit 1; }'
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          ref: renders
+          path: data
+          sparse-checkout: jobs/${{ env.JOB }}
+      - id: plan
+        run: echo "chunks=$(python3 app/render/plan.py "data/jobs/$JOB/job.json")" >> "$GITHUB_OUTPUT"
+
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        chunk: ${{ fromJSON(needs.plan.outputs.chunks) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          ref: renders
+          path: data
+          sparse-checkout: jobs/${{ env.JOB }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: app/render/requirements.txt
+      - name: Install Blender
+        run: pip install -r app/render/requirements.txt
+      - name: Render frames ${{ matrix.chunk.first }} to ${{ matrix.chunk.last }}
+        run: python app/render/render_job.py "data/jobs/$JOB" frames ${{ matrix.chunk.first }} ${{ matrix.chunk.last }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frames-${{ env.JOB }}-${{ matrix.chunk.i }}
+          path: frames/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: [plan, render]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: renders
+          sparse-checkout: |
+            jobs/${{ env.JOB }}/job.json
+            out/README.md
+      - uses: actions/download-artifact@v4
+        if: needs.render.result == 'success'
+        with:
+          pattern: frames-${{ env.JOB }}-*
+          path: frames
+          merge-multiple: true
+      - name: Assemble the result
+        env:
+          RENDER_RESULT: ${{ needs.render.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          OUT="out/$JOB"; mkdir -p "$OUT"
+          read -r KIND F0 F1 FPS <<< "$(python3 -c "import json;j=json.load(open('jobs/$JOB/job.json'));print(j['kind'],j['frames'][0],j['frames'][1],j.get('fps',24))")"
+          if [ "$RENDER_RESULT" != "success" ]; then
+            printf '{"status":"failed","run":"%s"}\n' "$RUN_URL" > "$OUT/result.json"; exit 0
+          fi
+          if [ "$KIND" = "still" ]; then
+            cp "frames/frame_$(printf %04d "$F0").png" "$OUT/render.png"
+            FILE=render.png
+          else
+            command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
+            ffmpeg -loglevel error -framerate "$FPS" -start_number "$F0" -i frames/frame_%04d.png \
+              -c:v libx264 -pix_fmt yuv420p -crf 18 -movflags +faststart "$OUT/shot.mp4"
+            cp "frames/frame_$(printf %04d "$F0").png" "$OUT/poster.png"
+            FILE=shot.mp4
+          fi
+          printf '{"status":"done","file":"%s","frames":%d,"run":"%s"}\n' "$FILE" "$((F1 - F0 + 1))" "$RUN_URL" > "$OUT/result.json"
+      - name: Commit the result to the renders branch
+        run: |
+          git config user.name "rigroom-render"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --sparse "out/$JOB"
+          git diff --cached --quiet && { echo "Nothing new to commit"; exit 0; }
+          git commit -q -m "Render $JOB"
+          for try in 1 2 3 4; do
+            git pull -q --rebase origin renders && git push -q origin HEAD:renders && exit 0
+            sleep $((try * 5))
+          done
+          exit 1

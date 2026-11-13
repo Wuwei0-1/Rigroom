@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import * as app from './app.js';
 import { initAgent, addMsg } from './agent.js';
 import { initTrace } from './trace.js';
+import { initServer } from './server.js';
 
 const V3 = THREE.Vector3;
 
@@ -49,7 +50,7 @@ export function buildBooth() {
 }
 
 document.querySelector('#boothBtn').onclick = () => { app.pushUndo(); buildBooth(); app.toast('Booth scene loaded.'); };
-initAgent(); initTrace();
+initAgent(); initTrace(); initServer();
 
 app.start(() => {
   let restored = false;

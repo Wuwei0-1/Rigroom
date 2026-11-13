@@ -566,10 +566,16 @@ function bakeClip() {
   const tracks = []; for (const x of list) { tracks.push(new THREE.QuaternionKeyframeTrack(x.b.obj.uuid + '.quaternion', times, x.Q)); if (x.P) tracks.push(new THREE.VectorKeyframeTrack(x.b.obj.uuid + '.position', times, x.P)); }
   evaluate(0); return new THREE.AnimationClip('RigroomAction', anim.length / anim.fps, tracks);
 }
-export function exportGLB() {
-  return new Promise((res, rej) => { pause(); const keep = frame; let clip; try { clip = bakeClip(); } catch (e) { return rej(e); }
-    new GLTFExporter().parse(stage, out => { applyFrame(keep); res(out); }, err => { applyFrame(keep); rej(err); }, { binary: true, animations: clip.tracks.length ? [clip] : [] }); });
+export function exportGLB(opts) {
+  const animated = !opts || opts.animated !== false;
+  return new Promise((res, rej) => { pause(); const keep = frame; let clip = null;
+    if (animated) { try { clip = bakeClip(); } catch (e) { return rej(e); } } else evaluate(keep);
+    stage.updateMatrixWorld(true);
+    new GLTFExporter().parse(stage, out => { applyFrame(keep); res(out); }, err => { applyFrame(keep); rej(err); }, { binary: true, animations: clip && clip.tracks.length ? [clip] : [] }); });
 }
+// the shot camera at a frame, or the free view when no camera is keyed
+export function cameraAt(f) { const k = camAt(f); return k ? { p: k.p.slice(), t: k.t.slice(), fov: k.fov } : { p: camera.position.toArray(), t: orbit.target.toArray(), fov: camera.fov }; }
+export function frameAspect() { return ref.url && shotView ? ref.aspect : (camKeys.length ? (ref.url ? ref.aspect : 16 / 9) : camera.aspect); }
 $('#glbBtn').onclick = async () => { try { const buf = await exportGLB(); saveFile('rigroom-scene.glb', new Blob([buf], { type: 'model/gltf-binary' })); } catch (e) { toast('Export failed: ' + (e && e.message || e), true); } };
 $('#videoBtn').onclick = () => {
   if (recording || tracing) return;
