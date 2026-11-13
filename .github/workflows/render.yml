@@ -111,7 +111,7 @@ jobs:
       - name: Install Blender
         run: pip install -r app/render/requirements.txt
       - name: Render frames ${{ matrix.chunk.first }} to ${{ matrix.chunk.last }}
-        run: python app/render/render_job.py "data/jobs/$JOB" frames ${{ matrix.chunk.first }} ${{ matrix.chunk.last }} > render.log 2>&1 || { grep -E "rendered|Error|Traceback" render.log | tail -20; exit 1; }
+        run: python app/render/render_job.py "data/jobs/$JOB" frames ${{ matrix.chunk.first }} ${{ matrix.chunk.last }} > render.log 2>&1 || { grep -vE "glTF|Blender create|^$" render.log | tail -25; exit 1; }
       - name: Pack the frames
         env:
           KEY: ${{ secrets.STUDIO_TOKEN }}

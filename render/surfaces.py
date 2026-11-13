@@ -513,6 +513,7 @@ def lens_finish(scene, amount=1.0):
         tree.links.new(lens.outputs['Image'], out.inputs[0])
         scene.compositing_node_group = tree
         scene.render.use_compositing = True
+        scene.render.compositor_device = 'CPU'   # render machines have no graphics card
         return True
     except Exception as err:  # an older or newer Blender: render without the lens pass
         print('lens pass skipped:', err, flush=True)
