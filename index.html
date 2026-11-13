@@ -9,8 +9,8 @@
 <title>Rigroom Animator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./src/ui.css?v=2026.11.13-1541">
-<script>window.RIGROOM_VERSION = "2026.11.13-1541";</script>
+<link rel="stylesheet" href="./src/ui.css?v=2026.11.13-1643">
+<script>window.RIGROOM_VERSION = "2026.11.13-1643";</script>
 <script type="importmap">
 {
   "imports": {
@@ -19,13 +19,14 @@
     "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/",
     "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.18/build/index.module.js",
     "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js",
-    "./src/app.js": "./src/app.js?v=2026.11.13-1541",
-    "./src/agent.js": "./src/agent.js?v=2026.11.13-1541",
-    "./src/trace.js": "./src/trace.js?v=2026.11.13-1541",
-    "./src/server.js": "./src/server.js?v=2026.11.13-1541",
-    "./src/models.js": "./src/models.js?v=2026.11.13-1541",
-    "./src/github.js": "./src/github.js?v=2026.11.13-1541",
-    "./src/studio.js": "./src/studio.js?v=2026.11.13-1541"
+    "./src/app.js": "./src/app.js?v=2026.11.13-1643",
+    "./src/agent.js": "./src/agent.js?v=2026.11.13-1643",
+    "./src/trace.js": "./src/trace.js?v=2026.11.13-1643",
+    "./src/server.js": "./src/server.js?v=2026.11.13-1643",
+    "./src/models.js": "./src/models.js?v=2026.11.13-1643",
+    "./src/github.js": "./src/github.js?v=2026.11.13-1643",
+    "./src/studio.js": "./src/studio.js?v=2026.11.13-1643",
+    "./src/motion.js": "./src/motion.js?v=2026.11.13-1643"
   }
 }
 </script>
@@ -112,6 +113,20 @@
           </div>
           <p class="note">A pinned hand or foot stays where it is while you pose the rest of the body.</p>
         </div>
+        <div class="group" id="motionGroup">
+          <h3>Motion</h3>
+          <div class="row"><select id="motionPick" style="flex:1;min-width:0" aria-label="Motion"><option value="">No motions yet</option></select></div>
+          <div class="row"><label for="motionParts">Body</label><select id="motionParts"><option value="body">Whole body</option><option value="upper">Upper body</option><option value="arms">Arms</option><option value="lower">Hips and legs</option><option value="head">Head and neck</option></select></div>
+          <div class="row"><label for="motionMode">Mode</label><select id="motionMode"><option value="replace">Replace</option><option value="layer">Layer on top</option></select></div>
+          <div class="row"><label for="motionSpeed">Speed</label><input type="range" id="motionSpeed" min="25" max="200" step="5" value="100"><span class="val" id="motionSpeedV">100%</span></div>
+          <div class="row"><label for="motionRepeat">Repeat</label><input type="number" id="motionRepeat" min="1" max="50" value="1" style="width:76px"><label style="min-width:0"><input type="checkbox" id="motionInPlace"> In place</label></div>
+          <div class="row">
+            <button class="btn primary" id="motionApply" disabled>Apply at this frame</button>
+            <button class="btn" id="motionImport">Import motion…</button>
+          </div>
+          <p class="note" id="motionNote">Import a file with recorded movement (an animated .fbx or .glb). It becomes ordinary keys you can edit.</p>
+          <input type="file" id="fileMotion" multiple hidden>
+        </div>
         <div class="group">
           <h3>Skeleton</h3>
           <div id="boneList" class="list"></div>
@@ -132,6 +147,7 @@
         <div class="group" id="lookGroup">
           <h3>Look</h3>
           <div class="row"><span id="lookName" class="note" style="flex:1;min-width:0">Mannequin</span></div>
+          <div class="row"><select id="lookPick" style="flex:1;min-width:0" aria-label="Your people" disabled><option value="">Your people…</option></select></div>
           <div class="row">
             <button class="btn" id="lookReal">Real model…</button>
             <button class="btn" id="lookMannequin">Mannequin</button>
@@ -272,6 +288,6 @@
 <script>
 window.addEventListener('error',e=>{ const h=document.getElementById('hint'); if(h&&/import|module|three/i.test(String(e.message))) h.textContent='The 3D library did not load. Check the connection and reload.'; });
 </script>
-<script type="module" src="./src/main.js?v=2026.11.13-1541"></script>
+<script type="module" src="./src/main.js?v=2026.11.13-1643"></script>
 </body>
 </html>

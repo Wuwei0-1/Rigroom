@@ -6,6 +6,7 @@ import { initTrace } from './trace.js';
 import { initServer } from './server.js';
 import { prepareStudio, initStudio, saveNow, pull } from './studio.js';
 import * as models from './models.js';
+import * as motion from './motion.js';
 
 const V3 = THREE.Vector3;
 
@@ -84,4 +85,4 @@ checkForUpdate(); setInterval(checkForUpdate, 10 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
 
 // test hook for automated checks; harmless in normal use
-window.__rigroom = { app, buildBooth, models, studio: { saveNow, pull } };
+window.__rigroom = { app, buildBooth, models, motion, studio: { saveNow, pull } };

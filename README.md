@@ -21,16 +21,26 @@ The Agent tab talks to the Claude API directly from your browser. Open **Agent s
 
 ## Real people (looks)
 
-Any character can wear a look: a rigged human model. Select the character, then Stage → Look → **Real model…** and pick a `.glb` (or an `.fbx` or `.gltf` together with its texture images). The character keeps its name, place, animation and controls: you, the timeline, Reach and the agent still pose the mannequin skeleton, and the model follows it every frame. Its proportions are fitted to the model, so hands and feet land where you put them.
+Any character can wear a look: a rigged human model. Select the character, then Stage → Look and choose one of **Your people** (everyone this browser or your studio has), or **Real model…** and pick a `.glb` (or an `.fbx` or `.gltf` together with its texture images). The character keeps its name, place, animation and controls: you, the timeline, Reach and the agent still pose the mannequin skeleton, and the model follows it every frame. Its proportions are fitted to the model, so hands and feet land where you put them.
 
 - Skeletons are matched by bone name. Mixamo, Unreal, Character Creator, Rigify, 3ds Max Biped, VRM and Ready Player Me style rigs work.
-- Models are stored in the browser (IndexedDB), so scenes come back after a reload. A project file opened on another device shows mannequins until the models are imported there too.
+- Models are stored in the browser (IndexedDB), and with a studio connected they are copied there too, so every device has the same people.
 - Large scan textures are reduced to 2048 px so a tablet can hold several people at once.
 - `.glb` export, the render server and the in-browser render all use the real models.
 
 Scanned people come two ways. **Rigged** scans have a skeleton and can be a look. **Posed** scans (such as Renderpeople's Posed People) are frozen in one pose with no skeleton: import them with Stage → Import model and stand them in the scene as extras. Pick the 100k version of a scan on a tablet.
 
 Where to get models: Mixamo characters (free with an Adobe account), Renderpeople's free rigged scanned people, Character Creator, or any rigged humanoid you have the rights to use. Check each model's licence before publishing renders.
+
+## Motion (motion capture)
+
+Recorded movement from a file can go on any character. Pose → Motion → **Import motion…** and pick an animated `.fbx` or `.glb` (with its textures if you want the person in it too), such as a Renderpeople animated person or a Mixamo clip. The movement is moved onto Rigroom's standard skeleton once, so a walk recorded on one person plays on anyone: steps are scaled to the new character's legs.
+
+- Choose a motion, select a character, set the frame, and press **Apply at this frame**. It becomes ordinary keys on the timeline, which you and the agent can edit like any other.
+- **Body** limits it to the upper body, arms, hips and legs, or head. **Replace** swaps out those bones' keys over the span; **Layer on top** adds the movement to the pose that is there (an idle over a seated pose keeps the character seated).
+- **Speed** retimes it, **Repeat** plays it again (a walk keeps travelling), and **In place** takes out the forward travel.
+- The agent has the same: `list_motions` and `apply_motion` (with `from` and `to` in seconds to take a piece of a long clip).
+- Motions are stored in the browser and in your studio (`motions/`). Fingers and faces are not carried over yet.
 
 ## Studio
 
@@ -39,7 +49,7 @@ The studio is a private repository (by default `<this repository>-studio`, for e
 Connect it once per device under Project → Studio → Studio settings, with a fine-grained token that has **Contents: Read and write** and **Actions: Read and write** on both this repository and the studio.
 
 - The scene saves to `scenes/current.json` a few seconds after each change, and when the app goes to the background.
-- People and models a scene uses are uploaded once to `models/<fingerprint>.glb` and downloaded by any device that opens the scene.
+- People, models and motions you import are uploaded once (`models/<fingerprint>.glb`, `motions/<id>.json`) and downloaded by any device that needs them.
 - When the studio has a newer scene than this device (saved on another device, or by Claude), the app opens it, or asks first if this device has unsaved work.
 
 ## Render server
@@ -92,7 +102,7 @@ Any static server works, for example `python3 -m http.server` in this folder, th
 
 ## Known limits
 
-- Project files refer to imported models by fingerprint; the models themselves stay in the browser that imported them.
-- Looks follow the body and limbs; fingers and faces stay in the model's rest pose for now.
+- Project files refer to imported models by fingerprint; without a studio, the models stay in the browser that imported them.
+- Looks and motions follow the body and limbs; fingers, faces and shoulder shrugs stay in the model's rest pose for now.
 - IK is two-bone only. Feet are not planted automatically during playback.
 - Path-traced renders are grainy at low sample counts and have no denoiser yet. Only stills are path-traced; video is the real-time viewport.

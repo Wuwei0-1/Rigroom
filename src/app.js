@@ -5,7 +5,8 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { initModels, importFiles, instantiate, mapSkeleton, fitModel, measureFit, cachedName, preloadModels, listModels } from './models.js';
+import { initModels, importFiles, instantiate, mapSkeleton, fitModel, measureFit, cachedName, preloadModels, libraryModels } from './models.js';
+import { PARENT, PARTS, extractMotion, motionName, sampleBone, sampleHips, saveMotion, listMotions, getMotion, findMotion } from './motion.js';
 
 export const SKETCH_URL = './assets/sketch.jpg', SKETCH_ASPECT = 1.6364;
 const $ = s => document.querySelector(s);
@@ -240,9 +241,12 @@ export async function importModel(files, asLook) {
   let res;
   try { toast('Loading the model…'); res = await importFiles(files); }
   catch (err) { return toast('Could not load that model: ' + (err && err.message || err), true); }
+  const mo = await keepMotions(res), said = mo.kept.length ? ' Its movement is in your motions as ' + mo.kept.map(m => m.name).join(', ') + ' (Pose → Motion).' : '';
+  if (res.hash) libraryChanged(); refreshLookPick();
+  if (!res.hash) return toast(mo.kept.length ? 'Added ' + mo.kept.map(m => m.name).join(', ') + ' to your motions. Put it on a character from Pose → Motion.' : 'That file has a skeleton but no body or movement Rigroom can use.', !mo.kept.length);
   if (asLook) {
     if (!active || active.kind !== 'mannequin') return toast('Select a character first, then choose its look.', true);
-    try { pushUndo(); const e = swapLook(active, res.hash, res.name); toast(e.name + ' now looks like ' + res.name + '. Their animation is unchanged.'); refreshStageUI(); changed(); }
+    try { pushUndo(); const e = swapLook(active, res.hash, res.name); toast(e.name + ' now looks like ' + res.name + '. Their animation is unchanged.' + said); refreshStageUI(); changed(); }
     catch (err) { undoStack.pop(); updateUndoUI(); toast(err.message, true); }
     return;
   }
@@ -251,8 +255,22 @@ export async function importModel(files, asLook) {
   if (e.missing || !e.bones.length) { stage.remove(e.group); undoStack.pop(); updateUndoUI(); return toast('That file has nothing to show.', true); }
   e.pos = [0, 0, 1.2]; applyPlacement(e); ents.push(e); setActive(e); changed(); refreshStageUI();
   const rigged = e.bones.length > 1 && e.group.getObjectByProperty('isSkinnedMesh', true);
-  toast('Loaded ' + res.name + '. ' + (rigged ? 'To dress a character in it instead, select the character and use Look → Real model.' : 'It has no skeleton, so it stays in its scanned pose: use Place to stand it where you want.'));
+  toast('Loaded ' + res.name + '. ' + (rigged ? 'To dress a character in it instead, select the character and use Look → Real model.' : 'It has no skeleton, so it stays in its scanned pose: use Place to stand it where you want.') + said);
 }
+/** Import a file only for its movement (the person in it is kept too, so they can be worn as a look). */
+export async function importMotionFiles(files) {
+  let res;
+  try { toast('Reading the motion…'); res = await importFiles(files); }
+  catch (err) { return toast('Could not read that file: ' + (err && err.message || err), true); }
+  const mo = await keepMotions(res);
+  if (res.hash) { libraryChanged(); refreshLookPick(); }
+  if (!mo.kept.length) return toast(res.anim === null && mo.failed ? 'That file\u2019s skeleton is not a humanoid Rigroom can read.' : 'That file has no recorded movement in it.', true);
+  toast('Added ' + mo.kept.map(m => m.name + ' (' + m.seconds.toFixed(1) + ' s)').join(', ') + '. Choose a character and press Apply.' + (res.hash ? ' ' + res.name + ' is in your people too.' : ''));
+}
+let libHook = null;
+/** Called when a model or motion is added to this browser's library, so the studio can keep a copy. */
+export function onLibraryChange(fn) { libHook = fn; }
+function libraryChanged() { if (libHook) { try { libHook(); } catch (e) { /* best effort */ } } }
 export function loadGLB(buf, fileName) { return importModel([new File([buf], fileName.replace(/\.[^.]+$/, '') + '.glb')], false); }
 /* rotation convention shared by the sliders and the agent:
    [x,y,z] degrees about the character's own axes, relative to rest, in the parent's frame */
@@ -334,6 +352,59 @@ function evalTrack(b, tr, f) {
   if (a.p && c.p) { const o = [0, 0, 0];
     for (let i = 0; i < 3; i++) { const m1 = pv && pv.p ? (c.p[i] - pv.p[i]) / (c.f - pf) * span : 0, m2 = nx && nx.p ? (nx.p[i] - a.p[i]) / (nf - a.f) * span : 0; o[i] = h00 * a.p[i] + h10 * m1 + h01 * c.p[i] + h11 * m2; }
     b.obj.position.fromArray(o); }
+}
+/* ───────── motion: recorded movement written onto a character as ordinary keys ───────── */
+const tmpBone = { obj: new THREE.Object3D() }, rq = a => a.map(v => Math.round(v * 1e4) / 1e4);
+/**
+ * Key a stored motion onto a character from frame `start`. Options: parts ('body', 'upper', 'arms', 'lower', 'head',
+ * or a list of bones); mode 'replace' (clears those bones' keys over the span) or 'layer' (adds the motion's movement
+ * to what is keyed); speed; from / to (seconds within the motion); repeat (a walk keeps travelling each time round);
+ * inPlace (takes out the travel, keeps the sway); step (frames between keys).
+ */
+export function applyMotion(e, m, o = {}) {
+  if (!e || e.kind !== 'mannequin') throw new Error('Motions go on characters. Select a character.');
+  const parts = Array.isArray(o.parts) ? o.parts.filter(k => k in PARENT) : PARTS[o.parts || 'body'];
+  if (!parts || !parts.length) throw new Error('Choose body, upper, arms, lower or head, or a list of bones.');
+  const speed = clamp(+o.speed || 1, .1, 4), from = clamp(+o.from || 0, 0, m.seconds), to = clamp(o.to != null ? +o.to : m.seconds, Math.min(m.seconds, from + 1 / m.fps), m.seconds);
+  const len = Math.max(1 / m.fps, to - from), repeat = clamp(Math.round(+o.repeat || 1), 1, 50), layer = o.mode === 'layer';
+  const start = clamp(Math.round(+o.start || 0), 0, 1999), end = Math.min(2000, start + Math.max(1, Math.round(len / speed * repeat * anim.fps)));
+  const step = clamp(Math.round(+o.step || (end - start > 360 ? 2 : 1)), 1, 12);
+  const hipY = (e.params.fit && e.params.fit.hipY) || .96, h0 = sampleHips(m, from), drift = sampleHips(m, to).sub(h0).setY(0);
+  const fs = []; for (let f = start; f < end; f += step) fs.push(f); fs.push(end);
+  // what is keyed now, read before anything changes (for layering)
+  const base = {};
+  if (layer) for (const k of parts) { const b = e.byName.get(k), tr = e.tracks[k];
+    base[k] = fs.map(f => { if (tr && tr.length) { tmpBone.obj.quaternion.copy(b.restQ); tmpBone.obj.position.copy(b.restP); evalTrack(tmpBone, tr, f); return { q: tmpBone.obj.quaternion.clone(), p: tmpBone.obj.position.clone() }; } return { q: b.restQ.clone(), p: b.restP.clone() }; }); }
+  else for (const k of parts) { const tr = e.tracks[k]; if (!tr) continue; e.tracks[k] = tr.filter(x => x.f < start || x.f > end); if (!e.tracks[k].length) delete e.tracks[k]; }
+  const q0 = {}; for (const k of parts) q0[k] = sampleBone(m, k, from).invert();
+  fs.forEach((f, i) => {
+    const u = (f - start) / anim.fps * speed, cycle = Math.min(repeat - 1, Math.floor(u / len + 1e-6)), t = Math.min(to, from + u - cycle * len);
+    for (const k of parts) {
+      const b = e.byName.get(k); let q = sampleBone(m, k, t), p = null;
+      if (layer) q = base[k][i].q.clone().multiply(q0[k]).multiply(q);
+      if (k === 'hips') {
+        // the hips' travel from where the motion starts, scaled to this character's hip height
+        const off = sampleHips(m, t).sub(layer ? h0 : new V3(h0.x, 0, h0.z));
+        if (o.inPlace) off.addScaledVector(drift, -(t - from) / len); else off.addScaledVector(drift, cycle);
+        off.multiplyScalar(hipY); p = (layer ? base[k][i].p.clone() : b.restP.clone()).add(off);
+      }
+      setKey(e, k, f, rq(q.toArray()), p ? rq(p.toArray()) : null);
+    }
+  });
+  const extended = end > anim.length; if (extended) anim.length = end;
+  return { start, end, keys: fs.length * parts.length, extended };
+}
+/** Read the recorded movement out of an imported file and keep it in the motion library. */
+async function keepMotions(res) {
+  if (!res || !res.anim) return { kept: [], failed: 0 };
+  const kept = []; let failed = 0; const many = res.anim.clips.length > 1;
+  for (const clip of res.anim.clips.slice(0, 12)) {
+    let m = null; try { m = extractMotion(res.anim.root, clip, motionName(res.file, many ? clip : null)); } catch (e) { m = null; }
+    if (m) { await saveMotion(m); kept.push(m); } else failed++;
+  }
+  res.anim = null;
+  if (kept.length) { refreshMotionUI(kept[kept.length - 1].id); libraryChanged(); }
+  return { kept, failed };
 }
 export function evaluateEnt(e, f) { for (const b of e.bones) { const tr = e.tracks[b.name]; if (tr && tr.length) evalTrack(b, tr, f); } if (e.look) retarget(e); }
 function evaluate(f) { for (const e of ents) evaluateEnt(e, f); }
@@ -505,10 +576,11 @@ $('#restPose').onclick = () => { if (!active) return; pushUndo(); pause(); restE
 function refreshHeader() { const c = ents.filter(e => e.kind !== 'prop').length, p = ents.length - c; $('#rigName').textContent = c + ' character' + (c === 1 ? '' : 's') + ' · ' + p + ' prop' + (p === 1 ? '' : 's'); }
 function refreshLookUI() {
   const isChar = !!active && active.kind === 'mannequin', looked = isChar && !!active.params.look;
-  $('#lookReal').disabled = !isChar; $('#lookMannequin').disabled = !looked;
+  $('#lookReal').disabled = !isChar; $('#lookMannequin').disabled = !looked; if ($('#lookPick').options.length > 1) $('#lookPick').disabled = !isChar;
+  if ($('#motionPick')) updateMotionNote();
   $('#lookName').textContent = !isChar ? (active ? active.name + ' is not a character.' : 'Nothing selected.')
     : active.name + ': ' + (looked ? active.params.lookName + (active.lookMissing ? ' (not on this device, so the mannequin stands in)' : '') : 'mannequin');
-  $('#lookNote').textContent = isChar ? 'Real model… dresses ' + active.name + ' in a rigged human model (.glb, or .fbx picked with its textures). Poses, animation and the agent keep working.'
+  $('#lookNote').textContent = isChar ? 'Pick one of your people above, or Real model… to import a rigged human (.glb, or .fbx picked with its textures). Poses, animation and the agent keep working.'
     : 'Select a character to change how they look: tap them in the viewport or in the list above.';
 }
 export function refreshStageUI() {
@@ -549,6 +621,52 @@ $('#importBtn').onclick = () => $('#fileGlb').click();
 $('#fileGlb').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) importModel(f, false); };
 $('#fileLook').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) importModel(f, true); };
 $('#lookReal').onclick = () => { if (!active || active.kind !== 'mannequin') return toast('Select a character first.'); $('#fileLook').click(); };
+/* stored people to wear, from this browser and the studio */
+export async function refreshLookPick() {
+  const el = $('#lookPick'); if (!el) return; const all = (await libraryModels()).filter(m => m.rigged !== false);
+  el.textContent = ''; const first = new Option(all.length ? 'Your people…' : 'No people yet', ''); el.append(first);
+  for (const m of all) el.append(new Option(m.name + (m.here ? '' : ' (studio)'), m.hash));
+  el.value = ''; el.disabled = !all.length || !active || active.kind !== 'mannequin';
+}
+$('#lookPick').onfocus = () => refreshLookPick();
+$('#lookPick').onchange = async ev => {
+  const hash = ev.target.value; if (!hash) return; ev.target.value = '';
+  if (!active || active.kind !== 'mannequin') return toast('Select a character first.', true);
+  const name = ev.target.selectedOptions[0] ? ev.target.selectedOptions[0].textContent.replace(/ \(studio\)$/, '') : 'Model';
+  toast('Dressing ' + active.name + ' as ' + name + '…');
+  const missing = await preloadModels([hash]); if (missing.length) return toast(name + ' could not be fetched. Check your studio connection.', true);
+  try { pushUndo(); const e = swapLook(active, hash, name); toast(e.name + ' now looks like ' + name + '.'); refreshStageUI(); changed(); }
+  catch (err) { undoStack.pop(); updateUndoUI(); toast(err.message, true); }
+};
+/* motion: pick a recorded movement and key it onto the selected character */
+export async function refreshMotionUI(pick) {
+  const el = $('#motionPick'); if (!el) return; const keep = pick || el.value, all = await listMotions();
+  el.textContent = ''; if (!all.length) el.append(new Option('No motions yet', ''));
+  for (const m of all) el.append(new Option(m.name + ' · ' + m.seconds.toFixed(1) + ' s', m.id));
+  if (keep && all.some(m => m.id === keep)) el.value = keep;
+  updateMotionNote();
+}
+function updateMotionNote() {
+  const has = !!$('#motionPick').value, isChar = !!active && active.kind === 'mannequin';
+  $('#motionApply').disabled = !has || !isChar;
+  $('#motionNote').textContent = !has ? 'Import a file with recorded movement (an animated .fbx or .glb, such as a Renderpeople animated person or a Mixamo clip). It becomes ordinary keys you can edit.'
+    : !isChar ? 'Select a character to put the motion on.' : 'Keys it onto ' + active.name + ' from frame ' + Math.round(frame) + '. Replace swaps out those bones\u2019 keys; Layer adds the movement on top of the pose that is there.';
+}
+$('#motionPick').onchange = updateMotionNote;
+$('#motionPick').onfocus = () => refreshMotionUI();
+$('#motionSpeed').oninput = ev => { $('#motionSpeedV').textContent = ev.target.value + '%'; };
+$('#motionImport').onclick = () => $('#fileMotion').click();
+$('#fileMotion').onchange = ev => { const f = [...ev.target.files]; ev.target.value = ''; if (f.length) importMotionFiles(f); };
+$('#motionApply').onclick = async () => {
+  const id = $('#motionPick').value; if (!id || !active || active.kind !== 'mannequin') return updateMotionNote();
+  const m = await getMotion(id); if (!m) return toast('That motion could not be loaded.', true);
+  pause(); pushUndo();
+  try {
+    const r = applyMotion(active, m, { start: Math.round(frame), parts: $('#motionParts').value, mode: $('#motionMode').value, speed: +$('#motionSpeed').value / 100, repeat: +$('#motionRepeat').value || 1, inPlace: $('#motionInPlace').checked });
+    syncUI(); applyFrame(frame); changed(); refreshStageUI();
+    toast(m.name + ' on ' + active.name + ', frames ' + r.start + '–' + r.end + '.' + (r.extended ? ' The timeline now runs to ' + r.end + '.' : ''));
+  } catch (err) { undoStack.pop(); updateUndoUI(); toast(err.message, true); }
+};
 $('#lookMannequin').onclick = () => { if (!active || active.kind !== 'mannequin' || !active.params.look) return; pushUndo(); const e = swapLook(active, null); toast(e.name + ' is back to the mannequin.'); refreshStageUI(); changed(); };
 
 /* ───────── camera, look and reference ───────── */
@@ -794,14 +912,25 @@ export const TOOLS = [
       if (isFinite(i.sun_power)) look.sunPower = clamp(+i.sun_power, 0, 3); if (isFinite(i.ambient)) look.env = clamp(+i.ambient, 0, 2); applyLook(); act('lighting changed'); return { ...look }; } },
   { name: 'list_looks', description: 'List the human models stored on this device that characters can wear.',
     input_schema: { type: 'object', properties: {} },
-    async execute() { const m = await listModels(); return { looks: m.map(x => x.name), note: m.length ? undefined : 'No models yet. The user adds them with Stage → Look → Real model.' }; } },
+    async execute() { const m = (await libraryModels()).filter(x => x.rigged !== false); return { looks: m.map(x => x.name), note: m.length ? undefined : 'No models yet. The user adds them with Stage → Look → Real model.' }; } },
   { name: 'set_look', description: 'Dress a character in one of the stored human models (by name from list_looks), or "mannequin" to go back. The character keeps its position, animation and bone names.',
     input_schema: { type: 'object', required: ['character', 'look'], properties: { character: { type: 'string' }, look: { type: 'string' } } },
     async execute(i) { const e = needEnt(i.character); if (e.kind !== 'mannequin') throw new Error(e.name + ' is not a character.');
       if (/^mannequin$/i.test(String(i.look).trim())) { mutate(); swapLook(e, null); act(e.name + ' back to mannequin'); return { character: e.name, look: 'mannequin' }; }
-      const all = await listModels(), n = String(i.look).toLowerCase(), m = all.find(x => x.name.toLowerCase() === n) || all.find(x => x.name.toLowerCase().includes(n));
+      const all = await libraryModels(), n = String(i.look).toLowerCase(), m = all.find(x => x.name.toLowerCase() === n) || all.find(x => x.name.toLowerCase().includes(n));
       if (!m) throw new Error('No stored look called "' + i.look + '". Stored looks: ' + (all.map(x => x.name).join(', ') || 'none'));
-      await preloadModels([m.hash]); mutate(); swapLook(e, m.hash, m.name); act(e.name + ' now wears ' + m.name); return { character: e.name, look: m.name }; } },
+      const miss = await preloadModels([m.hash]); if (miss.length) throw new Error(m.name + ' is in the studio but could not be fetched.');
+      mutate(); swapLook(e, m.hash, m.name); act(e.name + ' now wears ' + m.name); return { character: e.name, look: m.name }; } },
+  { name: 'list_motions', description: 'List the recorded motions (motion capture) the user has imported: name and length in seconds.',
+    input_schema: { type: 'object', properties: {} },
+    async execute() { const m = await listMotions(); return { motions: m.map(x => ({ name: x.name, seconds: x.seconds })), note: m.length ? undefined : 'No motions yet. The user adds them with Pose → Motion → Import motion.' }; } },
+  { name: 'apply_motion', description: 'Key a recorded motion onto a character, as ordinary keyframes you can then read and edit. frame is where it starts (default 0). parts: "body" (default), "upper", "arms", "lower" (hips and legs) or "head", or a list of bone names. mode "replace" (default) swaps out those bones\' keys over the span; "layer" adds the motion\'s movement on top of the keys already there. from/to pick seconds within the motion; speed 1 is as recorded; repeat plays it several times (a walk keeps travelling); in_place takes out the forward travel. The timeline grows to fit.',
+    input_schema: { type: 'object', required: ['character', 'motion'], properties: { character: { type: 'string' }, motion: { type: 'string' }, frame: { type: 'integer' }, parts: {}, mode: { type: 'string', enum: ['replace', 'layer'] }, from: { type: 'number' }, to: { type: 'number' }, speed: { type: 'number' }, repeat: { type: 'integer' }, in_place: { type: 'boolean' } } },
+    async execute(i) { const e = needEnt(i.character); if (e.kind !== 'mannequin') throw new Error(e.name + ' is not a character.');
+      const m = await findMotion(i.motion); if (!m) { const all = await listMotions(); throw new Error('No motion called "' + i.motion + '". Motions: ' + (all.map(x => x.name).join(', ') || 'none')); }
+      mutate(); const r = applyMotion(e, m, { start: i.frame, parts: i.parts, mode: i.mode, from: i.from, to: i.to, speed: i.speed, repeat: i.repeat, inPlace: i.in_place });
+      evaluate(frame); act(m.name + ' on ' + e.name + ', frames ' + r.start + '-' + r.end);
+      return { character: e.name, motion: m.name, frames: [r.start, r.end], keys: r.keys, note: r.extended ? 'Timeline extended to ' + r.end + ' frames.' : undefined }; } },
   { name: 'playback', description: 'Control the viewport: "play", "pause", or "goto" a frame.',
     input_schema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['play', 'pause', 'goto'] }, frame: { type: 'integer' } } },
     execute(i) { if (i.action === 'play') wantPlay = true; else { wantPlay = false; pause(); if (i.action === 'goto') applyFrame(clamp(Math.round(+i.frame || 0), 0, anim.length)); } return { ok: true }; } },
@@ -835,6 +964,7 @@ Cheat sheet (degrees):
 - Standing naturally: upperArm_L [0,0,-78], upperArm_R [0,0,78], elbows bent about 10.
 - Sitting on a 0.45 m seat: hips pos [0,-0.40,0], thighs x -88, shins x +84.
 LOOKS: a character can wear a look, a real human model. Its controls do not change: you still pose the mannequin bones above, with the same names and the same cheat sheet, and the model follows them. A character wearing a look has the model's proportions, so its arm, leg and seat heights differ a little from the numbers above; use get_rig and get_joint_positions when exact heights matter. Use list_looks and set_look to change what a character wears.
+MOTIONS: the user can import recorded movement (motion capture: walks, idles, dances). list_motions shows them and apply_motion keys one onto any character, retargeted to that body. Prefer a recorded motion over hand keys when one fits the request, then refine with set_keyframes: for example apply a walk with parts "lower" and pose the arms yourself, or layer an idle over a seated pose. Recorded motions are keyed every frame or two, so edit them by changing whole spans rather than single frames.
 Imported models that are not characters have their own bone names: call get_rig and work from each bone's rest direction.
 
 HOW TO WORK:
