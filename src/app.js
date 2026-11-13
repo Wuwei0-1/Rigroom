@@ -5,6 +5,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { initModels, importFiles, instantiate, mapSkeleton, fitModel, measureFit, cachedName, preloadModels, listModels } from './models.js';
 
 export const SKETCH_URL = './assets/sketch.jpg', SKETCH_ASPECT = 1.6364;
 const $ = s => document.querySelector(s);
@@ -30,6 +31,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 frameEl.insertBefore(renderer.domElement, refEl);
+initModels(renderer);
 const canvas = renderer.domElement;
 
 const scene = new THREE.Scene();
@@ -92,7 +94,9 @@ function makeEnt(spec) {
   const n = parseInt(String(e.id).slice(1), 10); if (isFinite(n)) uid = Math.max(uid, n + 1);
   if (e.params.rough == null) e.params.rough = .8; if (e.params.metal == null) e.params.metal = 0;
   e.group.userData.ent = e; stage.add(e.group);
-  if (e.kind === 'mannequin') buildMannequin(e); else if (e.kind === 'prop') buildProp(e);
+  if (e.kind === 'mannequin') { buildMannequin(e); if (e.params.look) attachLook(e); }
+  else if (e.kind === 'prop') buildProp(e);
+  else if (e.kind === 'import' && e.params.model) buildImport(e);
   return e;
 }
 function applyPlacement(e) { e.group.position.fromArray(e.pos); e.group.rotation.set(e.rot[0] * DEG, e.rot[1] * DEG, e.rot[2] * DEG, 'YXZ'); e.group.scale.setScalar(e.scale); }
@@ -104,7 +108,7 @@ function finalizeRig(e, objs) {
     let p = o.parent; while (p && !set.has(p)) p = p.parent;
     bones.push({ ent: e, name: o.userData.rigName, obj: o, parent: p ? p.userData.rigName : null, isRoot: !p, depth: 0, dir: null,
       restQ: o.quaternion.clone(), restP: o.position.clone(),
-      parentRestWQ: o.parent.getWorldQuaternion(new Q4()), restWP: o.getWorldPosition(new V3()) });
+      parentRestWQ: o.parent.getWorldQuaternion(new Q4()), restWP: o.getWorldPosition(new V3()), restCQ: o.getWorldQuaternion(new Q4()) });
   }
   e.bones = bones; e.byName = new Map(bones.map(b => [b.name, b]));
   for (const b of bones) { let d = 0, p = b.parent; while (p) { d++; p = e.byName.get(p).parent; } b.depth = d; }
@@ -114,29 +118,101 @@ function finalizeRig(e, objs) {
 function buildMannequin(e) {
   const mat = () => new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: e.params.rough, metalness: e.params.metal });
   const M = { MID: mat(), LEFT: mat(), RIGHT: mat(), DARK: mat() }; e.mats = M; tintMannequin(e);
-  const Y = new V3(0, 1, 0), sh = me => { me.castShadow = true; me.receiveShadow = true; return me; };
+  const Y = new V3(0, 1, 0), sh = me => { me.castShadow = true; me.receiveShadow = true; me.userData.mq = true; return me; };
+  const F = Object.assign({ hipY: .96, spine: .12, chest: .18, neck: .22, head: .08, shoulderX: .2, shoulderY: .17, upper: .28, fore: .26, hipX: .1, hipYoff: -.05, thigh: .42, shin: .42 }, e.params.fit || {});
   const seg = (bone, tip, r, m) => { const v = new V3(...tip), len = v.length(); const me = sh(new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.001, len - r * 0.6), 6, 14), m));
     me.position.copy(v).multiplyScalar(.5); me.quaternion.setFromUnitVectors(Y, v.clone().normalize()); bone.add(me); };
   const blob = (bone, pos, scale, m) => { const me = sh(new THREE.Mesh(new THREE.SphereGeometry(1, 22, 16), m)); me.position.set(...pos); me.scale.set(...scale); bone.add(me); };
   const box = (bone, pos, size, m) => { const me = sh(new THREE.Mesh(new THREE.BoxGeometry(...size), m)); me.position.set(...pos); bone.add(me); };
   const B = {}, order = [];
   const add = (name, parent, pos) => { const b = new THREE.Bone(); b.name = name; b.position.set(...pos); (parent ? B[parent] : e.group).add(b); B[name] = b; order.push(b); };
-  add('hips', null, [0, 0.96, 0]); blob(B.hips, [0, 0, 0], [.17, .11, .11], M.MID);
-  add('spine', 'hips', [0, 0.12, 0]); blob(B.spine, [0, .08, 0], [.145, .14, .1], M.MID);
-  add('chest', 'spine', [0, 0.18, 0]); blob(B.chest, [0, .1, 0], [.2, .16, .115], M.MID);
-  add('neck', 'chest', [0, 0.22, 0]); seg(B.neck, [0, .08, 0], .042, M.MID);
-  add('head', 'neck', [0, 0.08, 0]); blob(B.head, [0, .12, 0], [.1, .125, .11], M.MID); box(B.head, [0, .11, .105], [.03, .035, .04], M.DARK);
+  add('hips', null, [0, F.hipY, 0]); blob(B.hips, [0, 0, 0], [.17, .11, .11], M.MID);
+  add('spine', 'hips', [0, F.spine, 0]); blob(B.spine, [0, .08, 0], [.145, .14, .1], M.MID);
+  add('chest', 'spine', [0, F.chest, 0]); blob(B.chest, [0, .1, 0], [.2, .16, .115], M.MID);
+  add('neck', 'chest', [0, F.neck, 0]); seg(B.neck, [0, F.head, 0], .042, M.MID);
+  add('head', 'neck', [0, F.head, 0]); blob(B.head, [0, .12, 0], [.1, .125, .11], M.MID); box(B.head, [0, .11, .105], [.03, .035, .04], M.DARK);
   for (const [S, sx, m] of [['L', 1, M.LEFT], ['R', -1, M.RIGHT]]) {
-    add('upperArm_' + S, 'chest', [.2 * sx, .17, 0]); seg(B['upperArm_' + S], [.28 * sx, 0, 0], .046, m);
-    add('forearm_' + S, 'upperArm_' + S, [.28 * sx, 0, 0]); seg(B['forearm_' + S], [.26 * sx, 0, 0], .038, m);
-    add('hand_' + S, 'forearm_' + S, [.26 * sx, 0, 0]); box(B['hand_' + S], [.06 * sx, 0, 0], [.11, .03, .075], m);
+    add('upperArm_' + S, 'chest', [F.shoulderX * sx, F.shoulderY, 0]); seg(B['upperArm_' + S], [F.upper * sx, 0, 0], .046, m);
+    add('forearm_' + S, 'upperArm_' + S, [F.upper * sx, 0, 0]); seg(B['forearm_' + S], [F.fore * sx, 0, 0], .038, m);
+    add('hand_' + S, 'forearm_' + S, [F.fore * sx, 0, 0]); box(B['hand_' + S], [.06 * sx, 0, 0], [.11, .03, .075], m);
   }
   for (const [S, sx, m] of [['L', 1, M.LEFT], ['R', -1, M.RIGHT]]) {
-    add('thigh_' + S, 'hips', [.1 * sx, -.05, 0]); seg(B['thigh_' + S], [0, -.42, 0], .066, m);
-    add('shin_' + S, 'thigh_' + S, [0, -.42, 0]); seg(B['shin_' + S], [0, -.42, 0], .05, m);
-    add('foot_' + S, 'shin_' + S, [0, -.42, 0]); box(B['foot_' + S], [0, -.04, .07], [.09, .06, .23], m);
+    add('thigh_' + S, 'hips', [F.hipX * sx, F.hipYoff, 0]); seg(B['thigh_' + S], [0, -F.thigh, 0], .066, m);
+    add('shin_' + S, 'thigh_' + S, [0, -F.thigh, 0]); seg(B['shin_' + S], [0, -F.shin, 0], .05, m);
+    add('foot_' + S, 'shin_' + S, [0, -F.shin, 0]); box(B['foot_' + S], [0, -.04, .07], [.09, .06, .23], m);
   }
   finalizeRig(e, order);
+}
+/* ───────── looks: a real human model that follows a character's mannequin rig ───────── */
+const LOOK_ORDER = ['hips', 'spine', 'chest', 'neck', 'head', 'upperArm_L', 'forearm_L', 'hand_L', 'upperArm_R', 'forearm_R', 'hand_R', 'thigh_L', 'shin_L', 'foot_L', 'thigh_R', 'shin_R', 'foot_R'];
+const LOOK_CHILD = { hips: 'spine', spine: 'chest', chest: 'neck', neck: 'head', upperArm_L: 'forearm_L', forearm_L: 'hand_L', upperArm_R: 'forearm_R', forearm_R: 'hand_R', thigh_L: 'shin_L', shin_L: 'foot_L', thigh_R: 'shin_R', shin_R: 'foot_R' };
+const LOOK_INHERIT = { head: 'neck', hand_L: 'forearm_L', hand_R: 'forearm_R', foot_L: 'shin_L', foot_R: 'shin_R' };
+const _qa = new Q4(), _qb = new Q4(), _qc = new Q4(), _qd = new Q4(), _va = new V3(), _vb = new V3();
+function attachLook(e) {
+  const obj = instantiate(e.params.look);
+  if (!obj) { e.lookMissing = true; return; }
+  const { map, missing } = mapSkeleton(obj); if (missing.length) { e.lookMissing = true; return; }
+  const wrap = fitModel(obj, map); e.group.add(wrap); e.group.updateMatrixWorld(true);
+  const Einv = e.group.getWorldQuaternion(new Q4()).invert(), toChar = v => e.group.worldToLocal(v);
+  const P = o => toChar(o.getWorldPosition(new V3()));
+  const entries = [], R = {}, used = new Set();
+  for (const k of LOOK_ORDER) {
+    const dst = map[k], src = e.byName.get(k); if (!dst || !src || used.has(dst)) continue; used.add(dst);
+    let rot;
+    if (LOOK_CHILD[k]) {
+      let c = LOOK_CHILD[k]; while (c && map[c] === dst) c = LOOK_CHILD[c];   // a model with a one-bone spine
+      const sd = e.byName.get(c).restWP.clone().sub(src.restWP).normalize(), dd = P(map[c]).sub(P(dst)).normalize();
+      rot = new Q4().setFromUnitVectors(dd, sd);
+    } else rot = (R[LOOK_INHERIT[k]] || new Q4()).clone();
+    R[k] = rot;
+    entries.push({ src, dst, SrInv: src.restCQ.clone().invert(), R: rot, Tr: dst.getWorldQuaternion(new Q4()).premultiply(Einv) });
+  }
+  e.group.traverse(o => { if (o.userData.mq) o.visible = false; });
+  const hips = e.byName.get('hips');
+  e.look = { wrap, entries, hips: { dst: map.hips, restChar: P(map.hips), src: hips, srcRest: hips.restWP.clone() } };
+  e.lookMissing = false;
+  retarget(e);
+}
+export function retarget(e) {
+  const L = e.look; if (!L) return;
+  e.group.updateMatrixWorld(true);
+  const Einv = e.group.getWorldQuaternion(_qa).invert();
+  for (const m of L.entries) {
+    const T = m.src.obj.getWorldQuaternion(_qc).premultiply(Einv).multiply(m.SrInv).multiply(m.R).multiply(m.Tr);
+    const Pw = m.dst.parent.getWorldQuaternion(_qd).premultiply(Einv).invert();
+    m.dst.quaternion.copy(Pw.multiply(T)); m.dst.updateMatrixWorld(true);
+  }
+  const h = L.hips, off = e.group.worldToLocal(h.src.obj.getWorldPosition(_va)).sub(h.srcRest);
+  const t = e.group.localToWorld(_vb.copy(h.restChar).add(off)); h.dst.parent.worldToLocal(t);
+  h.dst.position.copy(t); h.dst.updateMatrixWorld(true);
+}
+/** Dress a character in a stored human model (hash), or back in the mannequin (null). Keeps its animation. */
+export function swapLook(e, hash, name) {
+  if (!e || e.kind !== 'mannequin') throw new Error('Only characters can wear a look.');
+  let fit = null;
+  if (hash) {
+    const obj = instantiate(hash); if (!obj) throw new Error('That model is not loaded on this device. Import it again.');
+    const { map, missing } = mapSkeleton(obj);
+    if (missing.length) throw new Error('This model\u2019s skeleton is missing: ' + missing.join(', ') + '. Use a rigged humanoid (Mixamo, Unreal, Character Creator and similar skeletons work).');
+    fitModel(obj, map); fit = measureFit(map, v => v);
+  }
+  const oldHipY = (e.params.fit && e.params.fit.hipY) || .96, newHipY = fit ? fit.hipY : .96;
+  const spec = sceneJSON(true), s = spec.ents.find(x => x.id === e.id);
+  s.params = { ...s.params }; delete s.params.look; delete s.params.lookName; delete s.params.fit;
+  if (hash) { s.params.look = hash; s.params.lookName = name || cachedName(hash) || 'Model'; s.params.fit = fit; }
+  // hips heights move with the new body, so poses keep their offsets from standing height
+  for (const k of (s.tracks.hips || [])) if (k.p) k.p = [k.p[0], k.p[1] - oldHipY + newHipY, k.p[2]];
+  applyScene(spec, true);
+  const ne = ents.find(x => x.id === e.id); setActive(ne); applyFrame(frame); return ne;
+}
+function buildImport(e) {
+  const obj = instantiate(e.params.model); if (!obj) { e.missing = true; return; }
+  const { map, missing } = mapSkeleton(obj), wrap = fitModel(obj, missing.length ? null : map, !missing.length);
+  e.group.add(wrap); e.group.updateMatrixWorld(true);
+  let objs = []; obj.traverse(o => { if (o.isBone) objs.push(o); });
+  if (!objs.length) { obj.traverse(o => { if (o !== obj && o.name && !o.isMesh && objs.length < 200) objs.push(o); }); if (!objs.length) obj.traverse(o => { if (o !== obj && o.name && objs.length < 200) objs.push(o); }); }
+  if (!objs.length) { const n = new THREE.Object3D(); n.name = 'object'; e.group.add(n); n.attach(wrap); objs = [n]; }
+  finalizeRig(e, objs);
 }
 function tintMannequin(e) {
   const base = new THREE.Color(e.params.color || '#b4b9c4'), M = e.mats;
@@ -160,29 +236,23 @@ function detach(e) { stage.remove(e.group); e.bones.forEach(b => handles.remove(
 function reattach(e) { stage.add(e.group); e.bones.forEach(b => handles.add(b.handle)); graveyard.delete(e.id); }
 function removeEnt(e) { detach(e); const i = ents.indexOf(e); if (i >= 0) ents.splice(i, 1); if (active === e) setActive(ents.find(x => x.kind !== 'prop') || ents[0] || null); }
 
-export function loadGLB(buf, fileName) {
-  new GLTFLoader().parse(buf, '', gltf => {
-    let e = null;
-    try {
-      pushUndo();
-      e = makeEnt({ kind: 'import', name: uniqueName(fileName.replace(/\.[^.]+$/, '') || 'Model'), params: { file: fileName } });
-      const fit = new THREE.Group(); e.group.add(fit); fit.add(gltf.scene); e.group.updateMatrixWorld(true);
-      let objs = []; gltf.scene.traverse(o => { if (o.isBone) objs.push(o); if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
-      let note = '';
-      if (!objs.length) { gltf.scene.traverse(o => { if (o !== gltf.scene && o.name && !o.isMesh && objs.length < 200) objs.push(o); });
-        if (!objs.length) gltf.scene.traverse(o => { if (o !== gltf.scene && o.name && objs.length < 200) objs.push(o); });
-        note = ' It has no skeleton, so its parts are used as bones.'; }
-      if (!objs.length) throw new Error('nothing to animate in that file');
-      const bb = new THREE.Box3(), v = new V3();
-      if (objs.length >= 3 && !note) objs.forEach(o => bb.expandByPoint(o.getWorldPosition(v))); else bb.setFromObject(gltf.scene);
-      const size = bb.getSize(new V3()), c = bb.getCenter(new V3()), s = size.y > 1e-6 ? 1.6 / size.y : 1;
-      fit.scale.setScalar(s); fit.position.set(-c.x * s, -bb.min.y * s, -c.z * s);
-      finalizeRig(e, objs); e.pos = [0, 0, 1.2]; applyPlacement(e); ents.push(e); setActive(e); changed(); refreshStageUI();
-      toast('Loaded ' + fileName + '.' + note);
-    } catch (err) { if (e) stage.remove(e.group); undoStack.pop(); updateUndoUI(); toast('Could not set up that model: ' + err.message, true); }
-  }, () => toast('Could not read that file. Use a self-contained .glb without Draco compression.', true));
+export async function importModel(files, asLook) {
+  let res;
+  try { toast('Loading the model…'); res = await importFiles(files); }
+  catch (err) { return toast('Could not load that model: ' + (err && err.message || err), true); }
+  if (asLook) {
+    if (!active || active.kind !== 'mannequin') return toast('Select a character first, then choose its look.', true);
+    try { pushUndo(); const e = swapLook(active, res.hash, res.name); toast(e.name + ' now looks like ' + res.name + '. Their animation is unchanged.'); refreshStageUI(); changed(); }
+    catch (err) { undoStack.pop(); updateUndoUI(); toast(err.message, true); }
+    return;
+  }
+  pushUndo();
+  const e = makeEnt({ kind: 'import', name: uniqueName(res.name || 'Model'), params: { model: res.hash, file: res.name } });
+  if (e.missing || !e.bones.length) { stage.remove(e.group); undoStack.pop(); updateUndoUI(); return toast('That file has nothing to show.', true); }
+  e.pos = [0, 0, 1.2]; applyPlacement(e); ents.push(e); setActive(e); changed(); refreshStageUI();
+  toast('Loaded ' + res.name + '. To dress a character in it instead, select the character and use Look → Real model.');
 }
-
+export function loadGLB(buf, fileName) { return importModel([new File([buf], fileName.replace(/\.[^.]+$/, '') + '.glb')], false); }
 /* rotation convention shared by the sliders and the agent:
    [x,y,z] degrees about the character's own axes, relative to rest, in the parent's frame */
 function eulerToLocal(b, rot) {
@@ -264,14 +334,14 @@ function evalTrack(b, tr, f) {
     for (let i = 0; i < 3; i++) { const m1 = pv && pv.p ? (c.p[i] - pv.p[i]) / (c.f - pf) * span : 0, m2 = nx && nx.p ? (nx.p[i] - a.p[i]) / (nf - a.f) * span : 0; o[i] = h00 * a.p[i] + h10 * m1 + h01 * c.p[i] + h11 * m2; }
     b.obj.position.fromArray(o); }
 }
-export function evaluateEnt(e, f) { for (const b of e.bones) { const tr = e.tracks[b.name]; if (tr && tr.length) evalTrack(b, tr, f); } }
+export function evaluateEnt(e, f) { for (const b of e.bones) { const tr = e.tracks[b.name]; if (tr && tr.length) evalTrack(b, tr, f); } if (e.look) retarget(e); }
 function evaluate(f) { for (const e of ents) evaluateEnt(e, f); }
 export function applyFrame(f) { frame = f; evaluate(f); updateFrameUI(); }
 function restEnt(e) { for (const b of e.bones) { b.obj.quaternion.copy(b.restQ); b.obj.position.copy(b.restP); } }
 
 /* scene <-> JSON */
 function specOf(e) { return { id: e.id, kind: e.kind, name: e.name, params: e.params, pos: e.pos, rot: e.rot, scale: e.scale, tracks: e.tracks }; }
-export function sceneJSON(withImports) { return { app: 'rigroom', v: 3, fps: anim.fps, length: anim.length, loop: anim.loop, ease: anim.ease, cam: camKeys, look: { ...look }, ref: ref.kind === 'sketch' ? 'sketch' : null, ents: ents.filter(e => withImports || e.kind !== 'import').map(specOf) }; }
+export function sceneJSON(withImports) { return { app: 'rigroom', v: 3, fps: anim.fps, length: anim.length, loop: anim.loop, ease: anim.ease, cam: camKeys, look: { ...look }, ref: ref.kind === 'sketch' ? 'sketch' : null, ents: ents.filter(e => withImports || e.kind !== 'import' || e.params.model).map(specOf) }; }
 function cleanTracks(e, tracks) { const out = {};
   for (const [name, tr] of Object.entries(tracks || {})) { if (!e.byName.has(name) || !Array.isArray(tr)) continue;
     const t = tr.filter(k => k && Array.isArray(k.q) && k.q.length === 4 && isFinite(k.f)).map(k => ({ f: Math.round(k.f), q: k.q.map(Number), p: Array.isArray(k.p) ? k.p.map(Number) : null })).sort((a, b) => a.f - b.f);
@@ -287,7 +357,7 @@ function applyScene(o, reuse) {
     if (!s || !['mannequin', 'prop', 'import'].includes(s.kind)) continue;
     let e = reuse ? (keep.get(s.id) || graveyard.get(s.id)) : null;
     if (e && e.kind === s.kind && (e.kind === 'import' || JSON.stringify(e.params) === JSON.stringify(s.params))) { if (keep.has(s.id)) keep.delete(s.id); else reattach(e); }
-    else if (s.kind !== 'import') { ents.length = 0; ents.push(...next, ...keep.values()); e = makeEnt({ id: reuse ? s.id : null, kind: s.kind, name: String(s.name || 'Object'), params: s.params }); }
+    else if (s.kind !== 'import' || (s.params && cachedName(s.params.model))) { ents.length = 0; ents.push(...next, ...keep.values()); e = makeEnt({ id: reuse ? s.id : null, kind: s.kind, name: String(s.name || 'Object'), params: s.params }); if (e.missing) { stage.remove(e.group); skipped++; continue; } }
     else { skipped++; continue; }
     e.name = String(s.name || e.name).slice(0, 40); e.pos = num3(s.pos, [0, 0, 0]); e.rot = num3(s.rot, [0, 0, 0]); e.scale = clamp(+s.scale || 1, .05, 20); applyPlacement(e);
     e.tracks = cleanTracks(e, s.tracks); next.push(e);
@@ -323,6 +393,11 @@ export function loadSceneObject(o) {
   playing = false; [...ents].forEach(detach); ents.length = 0; graveyard.clear(); active = null; sel = null;
   const skipped = applyScene(o, false);
   setActive(ents.find(e => e.kind !== 'prop') || ents[0] || null); applyFrame(0); frameCameraToShot(); syncUI(); changed(); setPlayIcon(); return skipped;
+}
+/** Load the stored models a scene refers to before building it. Returns how many are not on this device. */
+export async function preloadForScene(o) {
+  const hashes = (o && Array.isArray(o.ents) ? o.ents : []).map(s => s && s.params && (s.params.look || s.params.model)).filter(Boolean);
+  return hashes.length ? (await preloadModels(hashes)).length : 0;
 }
 export function clearStage() { playing = false; [...ents].forEach(detach); ents.length = 0; graveyard.clear(); active = null; sel = null; camKeys.length = 0; }
 
@@ -433,7 +508,9 @@ export function refreshStageUI() {
   const ed = $('#entEdit'); ed.style.display = active ? 'flex' : 'none'; if (!active) return;
   $('#entName').value = active.name; $('#entFacing').value = Math.round(active.rot[1]); $('#entFacingV').textContent = Math.round(active.rot[1]) + '°';
   $('#entSize').value = Math.round(active.scale * 100); $('#entSizeV').textContent = Math.round(active.scale * 100) + '%';
-  const isProp = active.kind === 'prop', hasMat = active.kind !== 'import';
+  const isProp = active.kind === 'prop', isChar = active.kind === 'mannequin', looked = isChar && !!active.params.look, hasMat = isChar ? !looked : active.kind !== 'import';
+  for (const id of ['lookRow', 'lookRow2', 'lookNote']) $('#' + id).style.display = isChar ? 'flex' : 'none';
+  if (isChar) { $('#lookName').textContent = looked ? active.params.lookName + (active.lookMissing ? ' (not on this device; showing the mannequin)' : '') : 'Mannequin'; $('#lookMannequin').disabled = !looked; }
   $('#propSizeRow').style.display = isProp ? 'flex' : 'none'; for (const id of ['colorRow', 'matRow', 'matRow2']) $('#' + id).style.display = hasMat ? 'flex' : 'none';
   if (isProp) ['pw', 'ph', 'pd'].forEach((id, i) => $('#' + id).value = active.params.size[i]);
   if (hasMat) { $('#entColor').value = active.params.color; $('#matRough').value = Math.round(active.params.rough * 100); $('#matRoughV').textContent = Math.round(active.params.rough * 100) + '%'; $('#matMetal').value = Math.round(active.params.metal * 100); $('#matMetalV').textContent = Math.round(active.params.metal * 100) + '%'; }
@@ -458,7 +535,10 @@ $('#dupEnt').onclick = () => { if (!active) return; if (active.kind === 'import'
   e.pos = [s.pos[0] + .6, s.pos[1], s.pos[2]]; e.rot = s.rot; e.scale = s.scale; applyPlacement(e); e.tracks = cleanTracks(e, s.tracks); ents.push(e); setActive(e); applyFrame(frame); changed(); };
 $('#delEnt').onclick = () => { if (!active) return; pushUndo(); const n = active.name; removeEnt(active); refreshStageUI(); changed(); toast(n + ' deleted. Undo brings it back.'); };
 $('#importBtn').onclick = () => $('#fileGlb').click();
-$('#fileGlb').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { loadGLB(await f.arrayBuffer(), f.name); } catch (err) { toast('Could not read that file.', true); } };
+$('#fileGlb').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) importModel(f, false); };
+$('#fileLook').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) importModel(f, true); };
+$('#lookReal').onclick = () => { if (!active || active.kind !== 'mannequin') return toast('Select a character first.'); $('#fileLook').click(); };
+$('#lookMannequin').onclick = () => { if (!active || active.kind !== 'mannequin' || !active.params.look) return; pushUndo(); const e = swapLook(active, null); toast(e.name + ' is back to the mannequin.'); refreshStageUI(); changed(); };
 
 /* ───────── camera, look and reference ───────── */
 function camAt(f) {
@@ -546,7 +626,7 @@ $('#ease').onchange = e => { pushUndo(); anim.ease = e.target.value; applyFrame(
 $('#showBones').onchange = e => { handles.visible = e.target.checked; if (boneLines) boneLines.visible = e.target.checked; };
 $('#openBtn').onclick = () => $('#fileProj').click();
 $('#fileProj').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  try { const o = JSON.parse(await f.text()); if (!o || o.app !== 'rigroom') throw 0; pushUndo(); const sk = loadSceneObject(o); toast(sk ? ('Opened. ' + sk + ' imported model(s) were not in the file; import them again.') : 'Project opened.'); }
+  try { const o = JSON.parse(await f.text()); if (!o || o.app !== 'rigroom') throw 0; await preloadForScene(o); pushUndo(); const sk = loadSceneObject(o); toast(sk ? ('Opened. ' + sk + ' imported model(s) were not in the file; import them again.') : 'Project opened.'); }
   catch (err) { toast('That file is not a Rigroom project.', true); } };
 $('#emptyBtn').onclick = () => { pushUndo(); loadSceneObject({ app: 'rigroom', v: 3, fps: 24, length: 48, loop: true, ease: 'spline', cam: [], ents: [{ kind: 'mannequin', name: 'Character', params: { color: '#b4b9c4', rough: .8, metal: 0 }, pos: [0, 0, 0], rot: [0, 0, 0], scale: 1, tracks: {} }] }); toast('Empty stage with one character.'); };
 
@@ -560,10 +640,11 @@ export function saveFile(filename, data) {
 }
 $('#saveBtn').onclick = () => saveFile('rigroom-project.json', JSON.stringify(sceneJSON(false)));
 function bakeClip() {
-  const list = []; for (const e of ents) for (const n of Object.keys(e.tracks)) { const b = e.byName.get(n); if (b) list.push({ b, Q: [], P: b.isRoot ? [] : null }); }
+  const list = []; for (const e of ents) for (const n of Object.keys(e.tracks)) { const b = e.byName.get(n); if (b) list.push({ obj: b.obj, Q: [], P: b.isRoot ? [] : null }); }
+  for (const e of ents) if (e.look) for (const m of e.look.entries) list.push({ obj: m.dst, Q: [], P: m.dst === e.look.hips.dst ? [] : null });
   const times = [];
-  for (let f = 0; f <= anim.length; f++) { evaluate(f); times.push(f / anim.fps); for (const x of list) { x.Q.push(...x.b.obj.quaternion.toArray()); if (x.P) x.P.push(...x.b.obj.position.toArray()); } }
-  const tracks = []; for (const x of list) { tracks.push(new THREE.QuaternionKeyframeTrack(x.b.obj.uuid + '.quaternion', times, x.Q)); if (x.P) tracks.push(new THREE.VectorKeyframeTrack(x.b.obj.uuid + '.position', times, x.P)); }
+  for (let f = 0; f <= anim.length; f++) { evaluate(f); times.push(f / anim.fps); for (const x of list) { x.Q.push(...x.obj.quaternion.toArray()); if (x.P) x.P.push(...x.obj.position.toArray()); } }
+  const tracks = []; for (const x of list) { tracks.push(new THREE.QuaternionKeyframeTrack(x.obj.uuid + '.quaternion', times, x.Q)); if (x.P) tracks.push(new THREE.VectorKeyframeTrack(x.obj.uuid + '.position', times, x.P)); }
   evaluate(0); return new THREE.AnimationClip('RigroomAction', anim.length / anim.fps, tracks);
 }
 export function exportGLB(opts) {
@@ -571,7 +652,7 @@ export function exportGLB(opts) {
   return new Promise((res, rej) => { pause(); const keep = frame; let clip = null;
     if (animated) { try { clip = bakeClip(); } catch (e) { return rej(e); } } else evaluate(keep);
     stage.updateMatrixWorld(true);
-    new GLTFExporter().parse(stage, out => { applyFrame(keep); res(out); }, err => { applyFrame(keep); rej(err); }, { binary: true, animations: clip && clip.tracks.length ? [clip] : [] }); });
+    new GLTFExporter().parse(stage, out => { applyFrame(keep); res(out); }, err => { applyFrame(keep); rej(err); }, { binary: true, maxTextureSize: 2048, animations: clip && clip.tracks.length ? [clip] : [] }); });
 }
 // the shot camera at a frame, or the free view when no camera is keyed
 export function cameraAt(f) { const k = camAt(f); return k ? { p: k.p.slice(), t: k.t.slice(), fov: k.fov } : { p: camera.position.toArray(), t: orbit.target.toArray(), fov: camera.fov }; }
@@ -612,7 +693,8 @@ export function writeKey(e, b, f, rot, pos) {
 }
 function entInfo(e) { const o = { name: e.name, kind: e.kind === 'prop' ? 'prop' : 'character', position: e.pos.map(r2) };
   if (e.kind === 'prop') { o.shape = e.params.shape; o.size = e.params.size.map(r2); o.rotation = e.rot.map(r1); } else { o.facing = r1(e.rot[1]); o.scale = r2(e.scale); o.rig = e.kind === 'mannequin' ? 'mannequin' : 'imported (' + e.bones.length + ' bones)'; }
-  if (e.kind !== 'import') o.material = { color: e.params.color, roughness: e.params.rough, metalness: e.params.metal };
+  if (e.kind === 'prop' || (e.kind === 'mannequin' && !e.params.look)) o.material = { color: e.params.color, roughness: e.params.rough, metalness: e.params.metal };
+  if (e.kind === 'mannequin') o.look = e.params.look ? e.params.lookName : 'mannequin';
   const n = Object.values(e.tracks).reduce((s, t) => s + t.length, 0); if (n) o.keyframes = n; return o; }
 const A3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 };
 export const TOOLS = [
@@ -699,6 +781,16 @@ export const TOOLS = [
     execute(i) { i = i || {}; mutate();
       if (isFinite(i.exposure)) look.exposure = clamp(+i.exposure, .2, 2); if (isFinite(i.sun_angle)) look.sunAngle = clamp(+i.sun_angle, -180, 180); if (isFinite(i.sun_height)) look.sunHeight = clamp(+i.sun_height, 5, 85);
       if (isFinite(i.sun_power)) look.sunPower = clamp(+i.sun_power, 0, 3); if (isFinite(i.ambient)) look.env = clamp(+i.ambient, 0, 2); applyLook(); act('lighting changed'); return { ...look }; } },
+  { name: 'list_looks', description: 'List the human models stored on this device that characters can wear.',
+    input_schema: { type: 'object', properties: {} },
+    async execute() { const m = await listModels(); return { looks: m.map(x => x.name), note: m.length ? undefined : 'No models yet. The user adds them with Stage → Look → Real model.' }; } },
+  { name: 'set_look', description: 'Dress a character in one of the stored human models (by name from list_looks), or "mannequin" to go back. The character keeps its position, animation and bone names.',
+    input_schema: { type: 'object', required: ['character', 'look'], properties: { character: { type: 'string' }, look: { type: 'string' } } },
+    async execute(i) { const e = needEnt(i.character); if (e.kind !== 'mannequin') throw new Error(e.name + ' is not a character.');
+      if (/^mannequin$/i.test(String(i.look).trim())) { mutate(); swapLook(e, null); act(e.name + ' back to mannequin'); return { character: e.name, look: 'mannequin' }; }
+      const all = await listModels(), n = String(i.look).toLowerCase(), m = all.find(x => x.name.toLowerCase() === n) || all.find(x => x.name.toLowerCase().includes(n));
+      if (!m) throw new Error('No stored look called "' + i.look + '". Stored looks: ' + (all.map(x => x.name).join(', ') || 'none'));
+      await preloadModels([m.hash]); mutate(); swapLook(e, m.hash, m.name); act(e.name + ' now wears ' + m.name); return { character: e.name, look: m.name }; } },
   { name: 'playback', description: 'Control the viewport: "play", "pause", or "goto" a frame.',
     input_schema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['play', 'pause', 'goto'] }, frame: { type: 'integer' } } },
     execute(i) { if (i.action === 'play') wantPlay = true; else { wantPlay = false; pause(); if (i.action === 'goto') applyFrame(clamp(Math.round(+i.frame || 0), 0, anim.length)); } return { ok: true }; } },
@@ -731,7 +823,8 @@ Cheat sheet (degrees):
 - forearm_L: y - bends the elbow (0 to -140). forearm_R: y + bends the elbow (0 to 140).
 - Standing naturally: upperArm_L [0,0,-78], upperArm_R [0,0,78], elbows bent about 10.
 - Sitting on a 0.45 m seat: hips pos [0,-0.40,0], thighs x -88, shins x +84.
-Imported models have their own bone names: call get_rig and work from each bone's rest direction.
+LOOKS: a character can wear a look, a real human model. Its controls do not change: you still pose the mannequin bones above, with the same names and the same cheat sheet, and the model follows them. A character wearing a look has the model's proportions, so its arm, leg and seat heights differ a little from the numbers above; use get_rig and get_joint_positions when exact heights matter. Use list_looks and set_look to change what a character wears.
+Imported models that are not characters have their own bone names: call get_rig and work from each bone's rest direction.
 
 HOW TO WORK:
 - The app state in the user's message lists what is on stage. Call get_scene or get_animation when you need exact values.
@@ -743,7 +836,7 @@ HOW TO WORK:
 - The app plays the result when you finish. Reply in one to three plain sentences: what you made, and one thing the user could ask to change. No markdown, no lists of keyframes.`;
 }
 export function stateBlock() {
-  const list = ents.slice(0, 40).map(e => e.kind === 'prop' ? `${e.name} (${e.params.shape} ${e.params.size.map(r2).join('x')} at ${e.pos.map(r2).join(',')})` : `${e.name} (${e.kind === 'mannequin' ? 'mannequin' : 'imported model'} at ${e.pos.map(r2).join(',')} facing ${r1(e.rot[1])}${Object.keys(e.tracks).length ? ', animated' : ''})`);
+  const list = ents.slice(0, 40).map(e => e.kind === 'prop' ? `${e.name} (${e.params.shape} ${e.params.size.map(r2).join('x')} at ${e.pos.map(r2).join(',')})` : `${e.name} (${e.kind === 'mannequin' ? (e.params.look ? 'character wearing ' + e.params.lookName : 'mannequin') : 'imported model'} at ${e.pos.map(r2).join(',')} facing ${r1(e.rot[1])}${Object.keys(e.tracks).length ? ', animated' : ''})`);
   return `[app state: timeline ${anim.length} frames at ${anim.fps} fps, loop ${anim.loop ? 'on' : 'off'}, motion ${anim.ease}; current frame ${Math.round(frame)}; selected: ${active ? active.name + (sel ? ' / ' + sel.name : '') : 'nothing'}; camera keys: ${camKeys.length}; on stage: ${list.join('; ') || 'nothing'}]`;
 }
 export function beginAgentTurn(onAct) { turnUndo = false; turnMutated = false; wantPlay = null; wantShot = false; actHook = onAct || (() => {}); }
@@ -778,6 +871,7 @@ function tick(now) {
     if (playing) { frame = f; evaluate(f); updateFrameUI(); }
   }
   if (shotView && camKeys.length) applyCam(camAt(frame)); else orbit.update();
+  for (const e of ents) if (e.look) retarget(e);
   if (sel && mode === 'reach' && !tc.dragging) sel.obj.getWorldPosition(ikTarget.position);
   const show = handles.visible; let i = 0; const pos = boneLines && boneLines.geometry.attributes.position;
   for (const e of ents) { const on = show && e === active;

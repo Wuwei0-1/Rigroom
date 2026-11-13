@@ -52,9 +52,15 @@ export function buildBooth() {
 document.querySelector('#boothBtn').onclick = () => { app.pushUndo(); buildBooth(); app.toast('Booth scene loaded.'); };
 initAgent(); initTrace(); initServer();
 
+// the saved scene may use human models kept in this browser; load them before building it
+let saved = null, missingModels = 0;
+try { const s = localStorage.getItem('rigroom.v3'); if (s) { const o = JSON.parse(s); if (o && o.app === 'rigroom' && Array.isArray(o.ents) && o.ents.length) saved = o; } } catch (e) { /* start fresh */ }
+if (saved) { try { missingModels = await app.preloadForScene(saved); } catch (e) { /* show mannequins instead */ } }
+
 app.start(() => {
   let restored = false;
-  try { const s = localStorage.getItem('rigroom.v3'); if (s) { const o = JSON.parse(s); if (o && o.app === 'rigroom' && Array.isArray(o.ents) && o.ents.length) { app.loadSceneObject(o); restored = true; } } } catch (e) { /* start fresh */ }
+  if (saved) { try { app.loadSceneObject(saved); restored = true; } catch (e) { /* start fresh */ } }
+  if (missingModels) app.toast(missingModels + ' model(s) in this scene are not stored in this browser, so mannequins stand in for them.', true);
   if (!restored) { buildBooth(); addMsg('agent', 'This is your booth sketch blocked out in 3D: Bram, Victor, Ines and Rosa around the table. Turn on Shot view in Project to see the drawing over it. Tell me what should move.'); }
   else addMsg('agent', 'Your last scene is back on stage. Tell me what to change.');
 });

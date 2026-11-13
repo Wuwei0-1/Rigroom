@@ -116,7 +116,7 @@
             <button class="btn" id="addChar">+ Character</button>
             <button class="btn" id="addBox">+ Box</button>
             <button class="btn" id="addCyl">+ Cylinder</button>
-            <button class="btn" id="importBtn">Import .glb</button>
+            <button class="btn" id="importBtn">Import model</button>
           </div>
         </div>
         <div class="group" id="entEdit">
@@ -125,6 +125,12 @@
           <div class="row"><label for="entFacing">Facing</label><input type="range" id="entFacing" min="-180" max="180" step="1" value="0"><span class="val" id="entFacingV">0°</span></div>
           <div class="row"><label for="entSize">Scale</label><input type="range" id="entSize" min="40" max="200" step="1" value="100"><span class="val" id="entSizeV">100%</span></div>
           <div class="row" id="propSizeRow"><label for="pw">W H D</label><input type="number" id="pw" step="0.05" min="0.01"><input type="number" id="ph" step="0.05" min="0.01"><input type="number" id="pd" step="0.05" min="0.01"></div>
+          <div class="row" id="lookRow"><label>Look</label><span id="lookName" class="note" style="flex:1;min-width:0">Mannequin</span></div>
+          <div class="row" id="lookRow2">
+            <button class="btn" id="lookReal">Real model…</button>
+            <button class="btn" id="lookMannequin">Mannequin</button>
+          </div>
+          <p class="note" id="lookNote">Dress this character in a rigged human model (.glb, or .fbx with its textures). Its poses, animation and the agent keep working.</p>
           <div class="row" id="colorRow"><label for="entColor">Color</label><input type="color" id="entColor"></div>
           <div class="row" id="matRow"><label for="matRough">Rough</label><input type="range" id="matRough" min="0" max="100" value="80"><span class="val" id="matRoughV">80%</span></div>
           <div class="row" id="matRow2"><label for="matMetal">Metal</label><input type="range" id="matMetal" min="0" max="100" value="0"><span class="val" id="matMetalV">0%</span></div>
@@ -132,9 +138,10 @@
             <button class="btn" id="dupEnt">Duplicate</button>
             <button class="btn" id="delEnt">Delete</button>
           </div>
-          <p class="note">Use Place in the viewport to move it. Imported models need a skeleton; Draco-compressed files are not supported yet.</p>
+          <p class="note">Use Place in the viewport to move it. Models can be .glb, or .gltf and .fbx picked together with their texture images.</p>
         </div>
-        <input type="file" id="fileGlb" hidden>
+        <input type="file" id="fileGlb" multiple hidden>
+        <input type="file" id="fileLook" multiple hidden>
       </div>
 
       <div class="pane" id="pane-project">

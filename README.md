@@ -19,6 +19,17 @@ The Agent tab talks to the Claude API directly from your browser. Open **Agent s
 - **Never commit a key to this repository.** The site is public; each person who uses the agent enters their own key.
 - Usage is billed to the key's account.
 
+## Real people (looks)
+
+Any character can wear a look: a rigged human model. Select the character, then Stage → Look → **Real model…** and pick a `.glb` (or an `.fbx` or `.gltf` together with its texture images). The character keeps its name, place, animation and controls: you, the timeline, Reach and the agent still pose the mannequin skeleton, and the model follows it every frame. Its proportions are fitted to the model, so hands and feet land where you put them.
+
+- Skeletons are matched by bone name. Mixamo, Unreal, Character Creator, Rigify, 3ds Max Biped, VRM and Ready Player Me style rigs work.
+- Models are stored in the browser (IndexedDB), so scenes come back after a reload. A project file opened on another device shows mannequins until the models are imported there too.
+- Large scan textures are reduced to 2048 px so a tablet can hold several people at once.
+- `.glb` export, the render server and the in-browser render all use the real models.
+
+Where to get models: Mixamo characters (free with an Adobe account), Renderpeople's free rigged scanned people, Character Creator, or any rigged humanoid you have the rights to use. Check each model's licence before publishing renders.
+
 ## Render server
 
 Project → Render server sends the scene to GitHub Actions, where Blender Cycles renders it on GitHub's machines. Public repositories get these machines free. A frame comes back as a PNG; a shot is split across up to 16 machines at once and comes back as an MP4.
@@ -54,6 +65,7 @@ src/app.js        viewport, stage, posing, timeline, agent tools
 src/agent.js      Claude API tool-use loop
 src/trace.js      path-traced still render in the browser (loaded on first use)
 src/server.js     render server: sends jobs to GitHub Actions and fetches results
+src/models.js     human models: loading, fitting, skeleton matching, browser storage
 render/           Blender render script and frame planner run by the workflow
 .github/workflows/render.yml   the render server itself
 assets/sketch.jpg reference sketch for the booth scene
@@ -65,6 +77,7 @@ Any static server works, for example `python3 -m http.server` in this folder, th
 
 ## Known limits
 
-- Imported models must be self-contained `.glb` files with a skeleton; Draco compression is not supported yet, and imported models are not stored in the project file.
+- Project files refer to imported models by fingerprint; the models themselves stay in the browser that imported them.
+- Looks follow the body and limbs; fingers and faces stay in the model's rest pose for now.
 - IK is two-bone only. Feet are not planted automatically during playback.
 - Path-traced renders are grainy at low sample counts and have no denoiser yet. Only stills are path-traced; video is the real-time viewport.
