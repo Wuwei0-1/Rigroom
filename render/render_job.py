@@ -53,7 +53,7 @@ def setup_scene(job, job_dir):
     look = job.get('look', {})
     # people first (their materials come from the scans), then the set's surfaces
     people = surfaces.shade_people(scene)
-    props = surfaces.dress_props(scene)
+    props = surfaces.dress_props(scene, os.path.join(job_dir, 'images'))
 
     # floor: the app draws a large floor that is not part of the exported stage
     bpy.ops.mesh.primitive_plane_add(size=60, location=(0, 0, 0))
@@ -150,7 +150,7 @@ def setup_speaker_light(scene, job, cams):
             fade = min((f - c['f0'] + 6) / 6.0, (c['f1'] + 10 - f) / 10.0)
             if fade > w:
                 best, w = c, fade
-        data.energy = power * max(0.0, min(1.0, w))
+        data.energy = float(best.get('power', power) if best else power) * max(0.0, min(1.0, w))
         if not best:
             return
         cam = cams.get(f) or cams[min(frames, key=lambda x: abs(x - f))]

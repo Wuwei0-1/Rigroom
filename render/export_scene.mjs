@@ -71,6 +71,14 @@ try {
   }, job);
   if (out.missing) { console.error(out.missing + ' model(s) used by the scene are not in the studio'); failed = true; }
   fs.writeFileSync(path.join(jobDir, 'scene.glb'), Buffer.from(out.glb, 'base64'));
+  // pictures shown on screens travel with the job (the render machines do not have the studio)
+  for (const e of job.scene.ents || []) {
+    const img = e.params && e.params.mat === 'screen' && e.params.image;
+    if (!img || !/^[\w./-]{1,80}$/.test(img) || img.includes('..')) continue;
+    const src = path.join(studio, img), dst = path.join(jobDir, 'images', path.basename(img));
+    if (fs.existsSync(src)) { fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.copyFileSync(src, dst); }
+    else { console.error('picture not in the studio: ' + img); failed = true; }
+  }
   const filled = { ...out.job }; delete filled.scene;
   fs.writeFileSync(jobPath, JSON.stringify({ ...filled, scene: job.scene }));
   console.log('scene.glb written:', (Buffer.from(out.glb, 'base64').length / 1e6).toFixed(1) + ' MB');

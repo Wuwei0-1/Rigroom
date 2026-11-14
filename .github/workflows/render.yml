@@ -67,6 +67,9 @@ jobs:
           for h in $(python3 -c "import json;j=json.load(open('$J/job.json'));x=json.load(open('data/models/index.json'));print(' '.join(sorted({(x.get(h) or {}).get('replacedBy') or h for h in {(e.get('params') or {}).get(k) for e in j['scene'].get('ents',[]) for k in ('look','model')} - {None}})))"); do
             [[ "$h" =~ ^[a-f0-9]{8,64}$ ]] && git -C data sparse-checkout add "models/$h.glb"
           done
+          for img in $(python3 -c "import json;j=json.load(open('$J/job.json'));print(' '.join(sorted({(e.get('params') or {}).get('image') for e in j['scene'].get('ents',[]) if (e.get('params') or {}).get('mat')=='screen'} - {None})))"); do
+            [[ "$img" =~ ^[A-Za-z0-9_./-]{1,80}$ && "$img" != *..* ]] && git -C data sparse-checkout add "$img"
+          done
           npm install --no-save --silent playwright-core@1.63.0 > /dev/null
           node app/render/export_scene.mjs app data "$J"
       - name: Pack the job

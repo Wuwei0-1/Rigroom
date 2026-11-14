@@ -115,7 +115,7 @@ function makeEnt(spec) {
   const e = { id: spec.id || ('e' + (uid++)), kind: spec.kind, name: spec.name, params: JSON.parse(JSON.stringify(spec.params || {})), group: new THREE.Group(), bones: [], byName: new Map(), tracks: {}, pins: new Map(), pos: [0, 0, 0], rot: [0, 0, 0], scale: 1 };
   const n = parseInt(String(e.id).slice(1), 10); if (isFinite(n)) uid = Math.max(uid, n + 1);
   if (e.params.rough == null) e.params.rough = .8; if (e.params.metal == null) e.params.metal = 0;
-  e.group.userData.ent = e; stage.add(e.group);
+  e.group.userData.ent = e; e.group.name = String(e.name || ''); stage.add(e.group);
   if (e.kind === 'mannequin') { buildMannequin(e); if (e.params.look) attachLook(e); }
   else if (e.kind === 'prop') buildProp(e);
   else if (e.kind === 'import' && e.params.model) buildImport(e);
@@ -322,7 +322,7 @@ function tintMannequin(e) {
 }
 // material presets: the viewport shows their sheen; the render server builds the full surface (grain, pores, bumps, rounded edges)
 export const MATS = { plain: null, wood: { rough: .45 }, leather: { rough: .5 }, fabric: { rough: .9 }, stone: { rough: .7 }, plaster: { rough: .92 }, metal: { rough: .3, metal: 1 }, paper: { rough: .8 },
-  glass: { rough: .05, opacity: .3 }, plastic: { rough: .35 }, ceramic: { rough: .15 }, brick: { rough: .9 }, velvet: { rough: 1 }, glow: { glow: 1.5 }, neon: { glow: 3 } };
+  glass: { rough: .05, opacity: .3 }, plastic: { rough: .35 }, ceramic: { rough: .15 }, brick: { rough: .9 }, velvet: { rough: 1 }, glow: { glow: 1.5 }, neon: { glow: 3 }, screen: { rough: .2, glow: 1.2 } };
 export const LIGHT_TYPES = ['area', 'spot', 'point'];
 const LIGHT_K = { point: .016, spot: .016, area: .064 };   // viewport brightness per watt, matched by eye to the renderer
 const isLight = e => !!e && e.kind === 'prop' && e.params.shape === 'light';
@@ -356,7 +356,8 @@ function propMesh(e) {
   if (!(p.mat in MATS)) p.mat = 'plain';
   if (p.shape === 'cylinder') geo = new THREE.CylinderGeometry(.5, .5, 1, 36); else if (p.shape === 'sphere') geo = new THREE.SphereGeometry(.5, 28, 18); else geo = new THREE.BoxGeometry(1, 1, 1);
   const pre = MATS[p.mat], col = new THREE.Color(p.color || '#8d8f96');
-  const mat = new THREE.MeshStandardMaterial({ name: 'rr:' + p.mat, color: col, roughness: pre ? pre.rough ?? .6 : p.rough, metalness: pre ? pre.metal || 0 : p.metal });
+  // a screen carries the studio path of the picture it shows in its material name: the renderer puts the picture on it
+  const mat = new THREE.MeshStandardMaterial({ name: 'rr:' + p.mat + (p.mat === 'screen' && typeof p.image === 'string' && /^[\w./-]{1,80}$/.test(p.image) ? '|' + p.image : ''), color: col, roughness: pre ? pre.rough ?? .6 : p.rough, metalness: pre ? pre.metal || 0 : p.metal });
   if (pre && pre.opacity) { mat.transparent = true; mat.opacity = pre.opacity; }
   if (pre && pre.glow) { mat.emissive = col; mat.emissiveIntensity = pre.glow; }
   const me = new THREE.Mesh(geo, mat); me.scale.set(s[0], s[1], s[2]); me.castShadow = !(pre && (pre.opacity || pre.glow)); me.receiveShadow = true; return me;

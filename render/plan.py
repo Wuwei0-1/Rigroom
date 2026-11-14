@@ -3,7 +3,7 @@ import json
 import math
 import sys
 
-MAX_RUNNERS = 16      # parallel machines per job
+MAX_RUNNERS = 20      # parallel machines per job (GitHub runs up to 20 at once for free)
 MIN_PER_RUNNER = 3    # each runner spends about a minute installing Blender, so give it real work
 
 with open(sys.argv[1]) as fh:

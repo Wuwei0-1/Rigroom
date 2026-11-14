@@ -7,6 +7,7 @@ assets/env, so the renderer needs no downloads.
 """
 import math
 import os
+import re
 
 import bmesh
 import bpy
@@ -136,6 +137,33 @@ def fresh(name):
 
 
 # ───────── prop surfaces ─────────
+
+def screen_surface(col, image_path, name):
+    """A glowing screen showing a picture (from the job's images folder), with a glossy glass front."""
+    mat, g, b = fresh(name)
+    I = b.inputs
+    I['Base Color'].default_value = (0.01, 0.01, 0.012, 1.0)
+    I['Roughness'].default_value = 0.12
+    I['Coat Weight'].default_value = 1.0
+    I['Coat Roughness'].default_value = 0.03
+    if image_path and os.path.exists(image_path):
+        tex = g.new('ShaderNodeTexImage')
+        tex.image = bpy.data.images.load(image_path)
+        tex.extension = 'CLIP'
+        # place the picture by the box's own extent, seen from its front (+Z in the app): x runs right, z up.
+        # (The exported UVs come out mirrored after the axis change, so they are not used.)
+        sep = g.new('ShaderNodeSeparateXYZ')
+        g.set(sep.inputs[0], g.new('ShaderNodeTexCoord').outputs['Generated'])
+        comb = g.new('ShaderNodeCombineXYZ')
+        g.set(comb.inputs[0], sep.outputs['X'])
+        g.set(comb.inputs[1], sep.outputs['Z'])
+        g.set(tex.inputs['Vector'], comb.outputs[0])
+        g.set(I['Emission Color'], tex.outputs['Color'])
+    else:
+        I['Emission Color'].default_value = col
+    I['Emission Strength'].default_value = 5.0
+    return mat
+
 
 def surface(preset, col, dims, name):
     """A material for one prop. col is its linear RGBA colour, dims its size in meters (local axes)."""
@@ -285,8 +313,9 @@ def pad(ob, width):
     wn.weight = 60
 
 
-def dress_props(scene):
-    """Turn every "rr:<preset>" material into its full surface, sized to the prop it is on."""
+def dress_props(scene, image_dir=None):
+    """Turn every "rr:<preset>" material into its full surface, sized to the prop it is on.
+    A screen's material is named "rr:screen|<studio path of its picture>"."""
     done = 0
     for ob in list(scene.objects):
         if ob.type != 'MESH' or ob.find_armature() or not ob.data.materials:
@@ -294,7 +323,9 @@ def dress_props(scene):
         slot = ob.data.materials[0]
         if not slot or not slot.name.startswith('rr:'):
             continue
-        preset = slot.name[3:].split('.')[0]
+        spec = re.sub(r'\.\d{3}$', '', slot.name[3:])   # Blender adds .001 to repeated names
+        preset, _, picture = spec.partition('|')
+        preset = preset.split('.')[0]
         if ob.data.users > 1:
             ob.data = ob.data.copy()
         # bake the prop's size into its shape, so textures are measured in meters
@@ -305,6 +336,12 @@ def dress_props(scene):
         bsdf = slot.node_tree.nodes.get('Principled BSDF') if slot.use_nodes else None
         col = tuple(bsdf.inputs['Base Color'].default_value) if bsdf else (0.5, 0.5, 0.5, 1.0)
         is_box = len(ob.data.polygons) <= 12
+        if preset == 'screen':
+            path = os.path.join(image_dir, os.path.basename(picture)) if picture and image_dir else None
+            ob.data.materials[0] = screen_surface(col, path, 'Screen ' + ob.name)
+            ob.visible_shadow = False
+            done += 1
+            continue
         if preset == 'plain':
             if bsdf and is_box:  # keep the look the user set; just take the razor edge off
                 g = Graph(slot.node_tree)
