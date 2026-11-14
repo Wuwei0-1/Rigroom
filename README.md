@@ -57,6 +57,24 @@ The viewport is a preview. The render server draws the real thing, and these are
 
 The agent has all of this: `add_light`, `place` (material, light settings), `set_lighting` (environment, floor, haze), `set_hands`, and `set_camera` with `fstop`.
 
+## Styles
+
+The same scene can be rendered in different looks: Project → Render server → **Style**.
+
+| Style | Looks like | Speed |
+|---|---|---|
+| Photoreal | Real surfaces, light, haze and lens (Cycles) | slowest |
+| Black-figure | Greek black-figure vase painting with neon outlines in each character's colour, on terracotta; the speaker's outline glows. The look of *The Ring of Gyges, Chapter 1* | about 3× faster |
+| Cel | A cartoon: the people's own colours in flat bands, ink outlines | about 3× faster |
+| Sketch | A pencil drawing on paper | about 3× faster |
+| Clay | A matte clay maquette under the scene's lights | about 4× faster |
+
+**Quality** scales the size (Preview 640 px up to Final 1920 px), and **Motion → On twos** renders every second frame and holds it, as hand-drawn animation does, for half the time. Styles other than Photoreal are drawn with Eevee (`render/styles.py`); a job sets `style`, and `style_colors` can change a character's outline colour.
+
+## Blender files
+
+A render job can also render a Blender file kept in the studio, exactly as it was made (its own engine, sets and animation; scripts inside the file never run): `{"source": "blend", "blend": "film/<id>/file.blend", "frames": [first, last], "fps": 12}`. Size can be set with `width` or `scale`. *The Ring of Gyges, Chapter 1* is rendered this way (`film/gyges-ch1/`).
+
 ## Film: script to video
 
 `film/` turns a script into a film on the render server. The script, voices and results live in the studio under `film/<id>/`.

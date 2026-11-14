@@ -93,7 +93,7 @@ for (const [i, s] of shots.entries()) { const end = (shots[i + 1] ? shots[i + 1]
 A.applyFrame(0);
 log.push({ length, seconds: +(length / fps).toFixed(1), shots: shots.length, cues: cues.map(c => [c.id, c.t]) });
 // who is speaking when, and where their head is: the renderer lights the speaker's outline from behind
-const speakers = cues.filter(c => !c.narration && onStage(c.speaker)).map(c => ({ n: c.n, f0: c.f0, f1: c.f1, head: headOf2(c.speaker, Math.min(length, c.f0 + 12)).map(v => +v.toFixed(3)),
+const speakers = cues.filter(c => !c.narration && onStage(c.speaker)).map(c => ({ n: c.n, who: c.speaker, f0: c.f0, f1: c.f1, head: headOf2(c.speaker, Math.min(length, c.f0 + 12)).map(v => +v.toFixed(3)),
   ...((data.speakerPower || {})[c.id] ? { power: data.speakerPower[c.id] } : {}) }));
 A.applyFrame(0);
 window.__film = { length, cues: cues.map(c => ({ id: c.id, n: c.n, t: c.t })), shots, speakers };

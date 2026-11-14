@@ -7,7 +7,13 @@ import { saveNow } from './studio.js';
 
 const $ = s => document.querySelector(s);
 const WORKFLOW = 'render.yml';
-const QUALITY = { draft: { width: 960, samples: 48 }, good: { width: 1280, samples: 128 }, final: { width: 1920, samples: 400 } };
+const QUALITY = { preview: { width: 640, samples: 16 }, draft: { width: 960, samples: 48 }, good: { width: 1280, samples: 128 }, final: { width: 1920, samples: 400 } };
+// how the scene is drawn (render/styles.py); every style but photoreal draws many times faster
+export const STYLES = { photoreal: 'Photoreal', 'black-figure': 'Black-figure (Chapter 1)', cel: 'Cel (cartoon)', sketch: 'Sketch (pencil)', clay: 'Clay' };
+for (const [id, key] of [['srvStyle', 'rigroom.renderStyle'], ['srvQuality', 'rigroom.renderQuality'], ['srvStep', 'rigroom.renderStep']]) {
+  const el = $('#' + id); try { const v = localStorage.getItem(key); if (v && [...el.options].some(o => o.value === v)) el.value = v; } catch (e) { /* storage unavailable */ }
+  el.addEventListener('change', () => { try { localStorage.setItem(key, el.value); } catch (e) { /* storage unavailable */ } });
+}
 const POLL_MS = 20000;
 let jobs = []; try { jobs = JSON.parse(localStorage.getItem('rigroom.jobs') || '[]'); } catch (e) { jobs = []; }
 let pollTimer = null, sending = false, shown = null;
@@ -26,13 +32,14 @@ async function send(kind) {
   const width = q.width, height = Math.round(width / frameAspect() / 2) * 2;
   const id = newId(kind);
   sending = true; $('#srvStill').disabled = $('#srvShot').disabled = true;
-  const job = { id, kind, frames, status: 'sending', created: Date.now(), repo: conf.studio };
+  const style = STYLES[$('#srvStyle').value] ? $('#srvStyle').value : 'photoreal', step = kind === 'shot' ? Math.max(1, +$('#srvStep').value || 1) : 1;
+  const job = { id, kind, frames, style, status: 'sending', created: Date.now(), repo: conf.studio };
   jobs.unshift(job); renderList();
   try {
     // the people in the scene must be in the studio before the renderer can use them
     if (!(await saveNow())) throw Object.assign(new Error('Could not save the scene to your studio.'), { shown: true });
     const cameras = []; for (let i = frames[0]; i <= frames[1]; i++) cameras.push({ f: i, ...cameraAt(i) });
-    const spec = { v: 2, id, kind, frames, fps: anim.fps, width, height, samples: q.samples,
+    const spec = { v: 2, id, kind, frames, fps: anim.fps, width, height, samples: q.samples, style, step,
       dof: $('#srvDof').checked ? { fstop: +$('#srvFstop').value } : null,
       cameras, look: { ...ctx.look }, floor: { color: '#6b6e76', roughness: 0.92 }, source: 'scene', scene: sceneJSON(false) };
     await commitFiles([{ path: `jobs/${id}/job.json`, text: JSON.stringify(spec) }], `Render job ${id}`);
@@ -86,7 +93,7 @@ function renderList() {
   for (const j of jobs.slice(0, 6)) {
     const row = document.createElement('div'); row.className = 'job';
     const what = document.createElement('span'); what.className = 'what';
-    what.textContent = (j.kind === 'still' ? 'Frame ' + j.frames[0] : 'Shot ' + j.frames[0] + '–' + j.frames[1]) + ' · ' + ago(j.created);
+    what.textContent = (j.kind === 'still' ? 'Frame ' + j.frames[0] : 'Shot ' + j.frames[0] + '–' + j.frames[1]) + (j.style && j.style !== 'photoreal' && STYLES[j.style] ? ' · ' + STYLES[j.style].split(' (')[0] : '') + ' · ' + ago(j.created);
     const pill = document.createElement('span');
     const label = { sending: 'Sending', rendering: 'Rendering', done: 'Done', failed: 'Failed' }[j.status] || j.status;
     pill.className = 'pill' + (j.status === 'done' ? ' done' : j.status === 'failed' ? ' bad' : ' run'); pill.textContent = label;

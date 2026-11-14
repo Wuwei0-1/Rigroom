@@ -17,6 +17,7 @@ import time
 import bpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import styles  # noqa: E402
 import surfaces  # noqa: E402
 from surfaces import to_blender  # noqa: E402
 
@@ -214,6 +215,8 @@ def main():
     cams = setup_camera(scene, job)
     setup_speaker_light(scene, job, cams)
     setup_render(scene, job)
+    style = styles.apply(scene, job)
+    grain = float(job.get('grain', 1.0 if style == 'photoreal' else 0.35))
 
     f0, f1 = job['frames']
     first = f0 if first is None else max(f0, first)
@@ -233,7 +236,7 @@ def main():
         scene.frame_set(f + offset)
         scene.render.filepath = os.path.join(out_dir, 'frame_%04d.png' % f)
         bpy.ops.render.render(write_still=True)
-        surfaces.film_finish(scene.render.filepath, f, float(job.get('grain', 1.0)))
+        surfaces.film_finish(scene.render.filepath, f, grain)
         print('rendered frame %d in %.1f s' % (f, time.time() - started), flush=True)
 
 
