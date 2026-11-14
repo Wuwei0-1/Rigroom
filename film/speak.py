@@ -1,7 +1,7 @@
 """Rigroom voices: speaks a script's lines with Chatterbox (https://github.com/resemble-ai/chatterbox).
 
     python speak.py voices SCRIPT.json VOICES.json REF_DIR OUT_DIR
-    python speak.py lines  SCRIPT.json VOICES.json PROMPT_DIR OUT_DIR [--part I/N] [--only A-B]
+    python speak.py lines  SCRIPT.json VOICES.json PROMPT_DIR OUT_DIR [--part I/N] [--only A-B] [--speaker NAME]
 
 Every character needs a short reference clip that sets what its voice sounds like.
   - If REF_DIR holds "<Character>.wav" (a recording you made, 8 to 20 seconds), that is the voice.
@@ -165,6 +165,8 @@ def speak_lines(args):
     if args.only:
         a, b = (int(x) for x in args.only.split('-'))
         lines = [l for l in lines if a <= l['n'] <= b]
+    if args.speaker:
+        lines = [l for l in lines if l['speaker'].lower() == args.speaker.lower()]
     i, n = (int(x) for x in args.part.split('/'))
     # spread the work by length, so every machine speaks about the same amount
     order = sorted(lines, key=lambda l: -len(l['say']))
@@ -210,7 +212,7 @@ def main():
     a.add_argument('script'); a.add_argument('voices'); a.add_argument('ref'); a.add_argument('out')
     b = sub.add_parser('lines')
     b.add_argument('script'); b.add_argument('voices'); b.add_argument('prompts'); b.add_argument('out')
-    b.add_argument('--part', default='1/1'); b.add_argument('--only', default='')
+    b.add_argument('--part', default='1/1'); b.add_argument('--only', default=''); b.add_argument('--speaker', default='')
     args = ap.parse_args()
     make_voices(args) if args.cmd == 'voices' else speak_lines(args)
 

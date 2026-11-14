@@ -16,6 +16,10 @@ on:
         description: Lines to speak, like 1-9 (empty for all)
         required: false
         default: ''
+      speaker:
+        description: Only this character's lines (empty for everyone)
+        required: false
+        default: ''
       parts:
         description: How many machines share the lines
         required: false
@@ -27,6 +31,7 @@ permissions:
 env:
   FILM: ${{ inputs.film }}
   ONLY: ${{ inputs.lines }}
+  SPEAKER: ${{ inputs.speaker }}
   STUDIO_REPO: ${{ vars.STUDIO_REPO || format('{0}-studio', github.repository) }}
 
 jobs:
@@ -44,6 +49,7 @@ jobs:
           [[ "$FILM" =~ ^[A-Za-z0-9_-]{1,60}$ ]] || { echo "Bad film id"; exit 1; }
           [[ "$ONLY" =~ ^([0-9]+-[0-9]+)?$ ]] || { echo "Lines must look like 1-9"; exit 1; }
           [[ "$PARTS" =~ ^[0-9]{1,2}$ ]] || { echo "Parts must be a number"; exit 1; }
+          [[ "$SPEAKER" =~ ^[A-Za-z\ ]{0,40}$ ]] || { echo "Speaker must be a character's name"; exit 1; }
           [ "$HAS_TOKEN" = true ] || { echo "The STUDIO_TOKEN secret is missing"; exit 1; }
       - id: plan
         env:
@@ -124,7 +130,7 @@ jobs:
           PART: ${{ matrix.part }}
           PARTS: ${{ inputs.parts }}
         run: |
-          python app/film/speak.py lines prompts/script.json prompts/voices.json prompts spoken --part "$PART/$PARTS" ${ONLY:+--only "$ONLY"} > speak.log 2>&1 || { tail -30 speak.log; exit 1; }
+          python app/film/speak.py lines prompts/script.json prompts/voices.json prompts spoken --part "$PART/$PARTS" ${ONLY:+--only "$ONLY"} ${SPEAKER:+--speaker "$SPEAKER"} > speak.log 2>&1 || { tail -30 speak.log; exit 1; }
           grep -E "^line [0-9]+\.[0-9]+ [A-Za-z ]+: [0-9.]+ s" speak.log | sed -E 's/^(line [0-9.]+) [A-Za-z ]+:/\1:/'
       - name: Pack the audio
         env:
@@ -177,7 +183,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --sparse "film/$FILM"
           git diff --cached --quiet && { echo "Nothing new to commit"; exit 0; }
-          git commit -q -m "Voices for $FILM ${ONLY:+(lines $ONLY)}"
+          git commit -q -m "Voices for $FILM ${ONLY:+(lines $ONLY)} ${SPEAKER:+($SPEAKER)}"
           for try in 1 2 3 4; do
             git pull -q --rebase origin main && git push -q origin HEAD:main && exit 0
             sleep $((try * 5))
