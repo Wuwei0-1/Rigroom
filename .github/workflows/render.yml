@@ -62,6 +62,12 @@ jobs:
         run: |
           J="data/jobs/$JOB"
           if [ -f "$J/scene.glb" ]; then echo "The job brought its own scene.glb"; exit 0; fi
+          # a job can render a Blender file kept in the studio, as it was made (its own engine, sets and animation)
+          BLEND=$(python3 -c "import json;j=json.load(open('$J/job.json'));print(j.get('blend','') if j.get('source')=='blend' else '')")
+          if [ -n "$BLEND" ]; then
+            [[ "$BLEND" =~ ^[A-Za-z0-9_./-]{1,120}\.blend$ && "$BLEND" != *..* ]] || { echo "Bad Blender file path"; exit 1; }
+            git -C data sparse-checkout add "$BLEND" && cp "data/$BLEND" "$J/scene.blend" && ls -la "$J/scene.blend"; exit 0
+          fi
           # fetch only the people and models this scene uses
           git -C data sparse-checkout add models/index.json
           for h in $(python3 -c "import json;j=json.load(open('$J/job.json'));x=json.load(open('data/models/index.json'));print(' '.join(sorted({(x.get(h) or {}).get('replacedBy') or h for h in {(e.get('params') or {}).get(k) for e in j['scene'].get('ents',[]) for k in ('look','model')} - {None}})))"); do
@@ -76,7 +82,9 @@ jobs:
         env:
           KEY: ${{ secrets.STUDIO_TOKEN }}
         run: |
-          tar -C "data/jobs/$JOB" -cf job.tar job.json scene.glb
+          # the scene (built here, or a Blender file the job brought) and any pictures shown on screens
+          (cd "data/jobs/$JOB" && tar -cf "$GITHUB_WORKSPACE/job.tar" job.json $(ls -d scene.glb scene.blend images 2>/dev/null))
+          tar -tf job.tar
           if [ "$STORE" = studio ]; then openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:KEY -in job.tar -out job.pack; else mv job.tar job.pack; fi
       - uses: actions/upload-artifact@v4
         with:
@@ -113,8 +121,13 @@ jobs:
           cache-dependency-path: app/render/requirements.txt
       - name: Install Blender
         run: pip install -r app/render/requirements.txt
+      - name: Install software drawing
+        # Eevee (used by Blender files that bring their own look, and by the drawn styles) needs OpenGL; these machines have no graphics card
+        run: sudo apt-get install -y -qq libegl1 libegl-mesa0 libgl1-mesa-dri > /dev/null 2>&1 || true
       - name: Render frames ${{ matrix.chunk.first }} to ${{ matrix.chunk.last }}
-        run: python app/render/render_job.py "data/jobs/$JOB" frames ${{ matrix.chunk.first }} ${{ matrix.chunk.last }} > render.log 2>&1 || { grep -vE "glTF|Blender create|^$" render.log | tail -25; exit 1; }
+        run: |
+          R=render_job.py; [ -f "data/jobs/$JOB/scene.blend" ] && R=render_blend.py
+          python "app/render/$R" "data/jobs/$JOB" frames ${{ matrix.chunk.first }} ${{ matrix.chunk.last }} > render.log 2>&1 || { grep -vE "glTF|Blender create|EGL Error|^$" render.log | tail -25; exit 1; }
       - name: Pack the frames
         env:
           KEY: ${{ secrets.STUDIO_TOKEN }}
