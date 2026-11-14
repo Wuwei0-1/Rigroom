@@ -491,6 +491,7 @@ function evalTrack(b, tr, f) {
     for (let i = 0; i < 3; i++) { const m1 = pv && pv.p ? (c.p[i] - pv.p[i]) / (c.f - pf) * span : 0, m2 = nx && nx.p ? (nx.p[i] - a.p[i]) / (nf - a.f) * span : 0; o[i] = h00 * a.p[i] + h10 * m1 + h01 * c.p[i] + h11 * m2; }
     b.obj.position.fromArray(o); }
 }
+const MAX_FRAMES = 60000;   // the longest timeline: about 40 minutes at 24 frames a second
 /* ───────── motion: recorded movement written onto a character as ordinary keys ───────── */
 const tmpBone = { obj: new THREE.Object3D() }, rq = a => a.map(v => Math.round(v * 1e4) / 1e4);
 /**
@@ -505,7 +506,7 @@ export function applyMotion(e, m, o = {}) {
   if (!parts || !parts.length) throw new Error('Choose body, upper, arms, lower or head, or a list of bones.');
   const speed = clamp(+o.speed || 1, .1, 4), from = clamp(+o.from || 0, 0, m.seconds), to = clamp(o.to != null ? +o.to : m.seconds, Math.min(m.seconds, from + 1 / m.fps), m.seconds);
   const len = Math.max(1 / m.fps, to - from), repeat = clamp(Math.round(+o.repeat || 1), 1, 50), layer = o.mode === 'layer';
-  const start = clamp(Math.round(+o.start || 0), 0, 1999), end = Math.min(2000, start + Math.max(1, Math.round(len / speed * repeat * anim.fps)));
+  const start = clamp(Math.round(+o.start || 0), 0, MAX_FRAMES - 1), end = Math.min(MAX_FRAMES, start + Math.max(1, Math.round(len / speed * repeat * anim.fps)));
   const step = clamp(Math.round(+o.step || (end - start > 360 ? 2 : 1)), 1, 12);
   const hipY = (e.params.fit && e.params.fit.hipY) || .96, h0 = sampleHips(m, from), drift = sampleHips(m, to).sub(h0).setY(0);
   const fs = []; for (let f = start; f < end; f += step) fs.push(f); fs.push(end);
@@ -558,7 +559,7 @@ function cleanTracks(e, tracks) { const out = {};
     if (t.length) out[name] = t; }
   return out; }
 function applyScene(o, reuse) {
-  anim.fps = clamp(+o.fps || 24, 1, 60); anim.length = clamp(Math.round(+o.length || 48), 1, 2000); anim.loop = o.loop !== false; anim.ease = ['spline', 'ease', 'linear'].includes(o.ease) ? o.ease : 'spline';
+  anim.fps = clamp(+o.fps || 24, 1, 60); anim.length = clamp(Math.round(+o.length || 48), 1, MAX_FRAMES); anim.loop = o.loop !== false; anim.ease = ['spline', 'ease', 'linear'].includes(o.ease) ? o.ease : 'spline';
   camKeys.length = 0; for (const k of (Array.isArray(o.cam) ? o.cam : [])) if (k && num3(k.p) && num3(k.t) && isFinite(k.f)) camKeys.push({ f: Math.round(k.f), p: k.p.map(Number), t: k.t.map(Number), fov: clamp(+k.fov || 35, 10, 90), ...(isFinite(k.fstop) && k.fstop > 0 ? { fstop: clamp(+k.fstop, .7, 32) } : {}) });
   camKeys.sort((a, b) => a.f - b.f);
   if (o.look) { for (const k of Object.keys(look)) if (typeof look[k] === 'number' && o.look[k] != null && isFinite(o.look[k])) look[k] = +o.look[k];
@@ -919,7 +920,7 @@ $('#autoKey').onclick = e => { autoKey = !autoKey; e.currentTarget.classList.tog
 
 /* project pane */
 export function syncUI() { $('#len').value = anim.length; $('#fps').value = anim.fps; $('#loop').checked = anim.loop; $('#ease').value = anim.ease; syncLens(); applyLook(); refreshStageUI(); updateFrameUI(); }
-$('#len').onchange = e => { pushUndo(); anim.length = clamp(Math.round(+e.target.value || 48), 1, 2000); frame = Math.min(frame, anim.length); syncUI(); changed(); };
+$('#len').onchange = e => { pushUndo(); anim.length = clamp(Math.round(+e.target.value || 48), 1, MAX_FRAMES); frame = Math.min(frame, anim.length); syncUI(); changed(); };
 $('#fps').onchange = e => { pushUndo(); anim.fps = clamp(Math.round(+e.target.value || 24), 1, 60); syncUI(); changed(); };
 $('#loop').onchange = e => { pushUndo(); anim.loop = e.target.checked; changed(); };
 $('#ease').onchange = e => { pushUndo(); anim.ease = e.target.value; applyFrame(frame); changed(); };
@@ -1021,7 +1022,7 @@ export const TOOLS = [
     execute(i) { const keys = i && i.keys; if (!Array.isArray(keys) || !keys.length) throw new Error('keys must be a non-empty array');
       const plan = keys.map(k => { const e = needEnt(k.character || i.character), b = needBone(e, k.bone);
         if (!num3(k.rot)) throw new Error('rot must be three numbers for ' + k.bone); if (!isFinite(k.frame) || k.frame < 0) throw new Error('frame must be 0 or more');
-        if (k.pos != null && !num3(k.pos)) throw new Error('pos must be three numbers for ' + k.bone); return { e, b, f: Math.min(2000, Math.round(k.frame)), rot: k.rot, pos: k.pos }; });
+        if (k.pos != null && !num3(k.pos)) throw new Error('pos must be three numbers for ' + k.bone); return { e, b, f: Math.min(MAX_FRAMES, Math.round(k.frame)), rot: k.rot, pos: k.pos }; });
       mutate(); let maxF = 0; const who = new Set();
       for (const k of plan) { writeKey(k.e, k.b, k.f, k.rot, k.pos); maxF = Math.max(maxF, k.f); who.add(k.e.name); }
       const out = { written: plan.length }; if (maxF > anim.length) { anim.length = maxF; out.note = 'Timeline extended to ' + maxF + ' frames.'; }
@@ -1029,7 +1030,7 @@ export const TOOLS = [
   { name: 'reach', description: 'Put a hand or foot at a point in scene space at one frame. Solves the two bones above it (upper arm and forearm, or thigh and shin) from the pose already keyed at that frame, and keys them. Write body keys (hips, spine, chest) for that frame first. pole is an optional scene-space direction the elbow or knee should point toward.',
     input_schema: { type: 'object', required: ['bone', 'target', 'frame'], properties: { character: { type: 'string' }, bone: { type: 'string' }, target: A3, frame: { type: 'integer' }, pole: A3 } },
     execute(i) { const e = needEnt(i.character), b = needBone(e, i.bone); if (!chainOf(b)) throw new Error(i.bone + ' has no two-bone chain above it. Use a hand or foot.');
-      const t = num3(i.target); if (!t) throw new Error('target must be three numbers'); const f = clamp(Math.round(+i.frame || 0), 0, 2000);
+      const t = num3(i.target); if (!t) throw new Error('target must be three numbers'); const f = clamp(Math.round(+i.frame || 0), 0, MAX_FRAMES);
       mutate(); if (f > anim.length) anim.length = f; evaluateEnt(e, f);
       const ch = reach(b, new V3(...t), num3(i.pole) ? new V3(...i.pole) : null, false); ch.forEach(x => keyCurrent(x, f));
       const got = b.obj.getWorldPosition(new V3()), miss = got.distanceTo(new V3(...t)); evaluate(frame);
@@ -1047,7 +1048,7 @@ export const TOOLS = [
   { name: 'set_timeline', description: 'Change timeline settings: length in frames, fps, loop, and motion ("spline" smooth curve through keys, "ease" pose-to-pose with a stop at each key, "linear").',
     input_schema: { type: 'object', properties: { length: { type: 'integer' }, fps: { type: 'integer' }, loop: { type: 'boolean' }, motion: { type: 'string', enum: ['spline', 'ease', 'linear'] } } },
     execute(i) { i = i || {}; mutate();
-      if (i.length != null) anim.length = clamp(Math.round(i.length), 1, 2000); if (i.fps != null) anim.fps = clamp(Math.round(i.fps), 1, 60);
+      if (i.length != null) anim.length = clamp(Math.round(i.length), 1, MAX_FRAMES); if (i.fps != null) anim.fps = clamp(Math.round(i.fps), 1, 60);
       if (i.loop != null) anim.loop = !!i.loop; if (['spline', 'ease', 'linear'].includes(i.motion)) anim.ease = i.motion;
       frame = Math.min(frame, anim.length); act('timeline: ' + anim.length + ' frames at ' + anim.fps + ' fps'); return { length: anim.length, fps: anim.fps, loop: anim.loop, motion: anim.ease }; } },
   { name: 'get_joint_positions', description: 'Check a pose: where a character\'s joints are in scene space (meters, y=0 is the floor) at a frame. Pass bones to limit the list.',

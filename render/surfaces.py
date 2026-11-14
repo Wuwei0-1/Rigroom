@@ -405,6 +405,16 @@ def shade_people(scene):
                 mask = g.math('MULTIPLY', mask, g.remap(rough.links[0].from_socket, 0.6, 0.5, smooth=True))
             else:
                 g.set(rough, g.remap(mask, 0.0, 1.0, 0.8, 0.44))
+            # inside an open mouth no light arrives and the tongue and teeth would render black: where the surface
+            # is deep in a small hollow, and is flesh- or tooth-coloured, it is lit from within
+            ao = g.new('ShaderNodeAmbientOcclusion', samples=4, only_local=True)
+            ao.inputs['Distance'].default_value = 0.035
+            hollow = g.remap(ao.outputs['AO'], 0.5, 0.18, smooth=True)
+            flesh = g.math('MAXIMUM', g.remap(h, 0.1, 0.07, smooth=True), g.remap(h, 0.9, 0.94, smooth=True))
+            teeth = g.math('MULTIPLY', g.remap(s, 0.3, 0.18, smooth=True), g.remap(v, 0.45, 0.6, smooth=True))
+            inner = g.math('MULTIPLY', hollow, g.math('MAXIMUM', flesh, teeth))
+            g.set(b.inputs['Emission Color'], base)
+            g.set(b.inputs['Emission Strength'], g.math('MULTIPLY', inner, 0.9))
             g.set(b.inputs['Subsurface Weight'], g.math('MULTIPLY', mask, 0.6))
             b.subsurface_method = 'RANDOM_WALK_SKIN'
             b.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.2)
