@@ -171,7 +171,7 @@ jobs:
           import json, os, sys
           job, fps = json.load(open(sys.argv[1])), float(sys.argv[2])
           a = job.get('audio') or {}
-          cues = [(c, 'film/%s/audio/%03d.mp3' % (a.get('film'), c['n'])) for c in a.get('cues', [])]
+          cues = [(c, 'film/%s/audio/%s.mp3' % (a.get('film'), c.get('id') or '%03d' % c['n'])) for c in a.get('cues', [])]
           cues = [(c, p) for c, p in cues if os.path.exists(p)]
           secs = (job['frames'][1] - job['frames'][0] + 1) / fps
           fade = float(job.get('fade', 0) or 0)

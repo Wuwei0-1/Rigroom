@@ -1,6 +1,6 @@
 // Rigroom film director: turns spoken lines into a filmed scene.
 // Runs inside the app page after the posing helpers (key, look, reach, headOf, jp, V, TH) with:
-//   data = { lines: [{ n, speaker, seconds, env }], cast: { Name: { jaw, hand, handBase } }, cams: { name: { p, t, fov, fstop } },
+//   data = { lines: [{ id, n, speaker, seconds, env, narration }],   (a narration is heard over the picture; nobody's mouth moves) cast: { Name: { jaw, hand, handBase } }, cams: { name: { p, t, fov, fstop } },
 //            shotFor: { Speaker: camName }, cutaways: { Speaker: [camName, ...] }, addressee: { Speaker: [names] }, lead, gap, tail, fps }
 // It keys: jaws from each line's loudness, blinks, who looks at whom, breathing, small hand gestures, and one camera per shot.
 // It returns { length, cues: [{ n, t }], shots: [{ f, cam }], speakers: [{ n, f0, f1, head }] } and leaves the keys on the scene.
@@ -11,12 +11,13 @@ const baseEuler = (name, bone) => { const tr = by(name).tracks[bone], q = tr && 
 
 // 1. when each line is spoken
 let t = data.lead; const cues = [];
-for (const l of data.lines) { cues.push({ n: l.n, t: +t.toFixed(3), f0: F(t), f1: F(t + l.seconds), speaker: l.speaker }); t += l.seconds + (l.gap ?? data.gap); }
+for (const l of data.lines) { cues.push({ id: l.id || String(l.n).padStart(3, '0'), n: l.n, t: +t.toFixed(3), f0: F(t), f1: F(t + l.seconds), speaker: l.speaker, narration: !!l.narration }); t += l.seconds + (l.gap ?? data.gap); }
+const first = cues.find(c => !c.narration) || cues[0];   // the first spoken line: the opening is timed back from it
 const length = F(t - data.gap + data.tail);
 A.anim.length = Math.max(A.anim.length, length); A.anim.fps = fps; A.anim.loop = false;
 
 // 2. jaws: the mouth opens with the loudness of the voice
-for (const [i, l] of data.lines.entries()) {
+for (const [i, l] of data.lines.entries()) { if (l.narration) continue;
   const c = cues[i], amp = (data.cast[l.speaker] || {}).jaw ?? 5, keys = [{ bone: 'jaw', frame: Math.max(0, c.f0 - 2), rot: [0, 0, 0] }];
   let prev = 0;
   for (let k = 0; k < l.env.length; k += 2) {
@@ -40,8 +41,8 @@ for (const n of names) { const b = baseEuler(n, 'chest'), keys = [], period = Ma
 // 5. eyes on the speaker: listeners turn to whoever speaks, the speaker looks at who they address
 const gaze = {}; for (const n of names) gaze[n] = [];
 const lookAtName = (who, target, f, amount) => { if (who !== target) gaze[who].push({ f, target, amount }); };
-for (const g of data.opening || []) gaze[g.who].push({ f: g.f, point: g.point, target: g.target, amount: g.amount });
-for (const [i, l] of data.lines.entries()) { const c = cues[i], to = (data.addressee[l.speaker] || names.filter(x => x !== l.speaker));
+for (const g of data.opening || []) gaze[g.who].push({ f: g.before != null ? Math.max(0, first.f0 - g.before) : g.f, point: g.point, target: g.target, amount: g.amount });
+for (const [i, l] of data.lines.entries()) { if (l.narration) continue; const c = cues[i], to = (data.addressee[l.speaker] || names.filter(x => x !== l.speaker));
   for (const n of names) if (n !== l.speaker) lookAtName(n, l.speaker, c.f0 + Math.round(2 + rnd() * 10), .92);
   // the speaker's eyes move between the people they address, every few seconds
   let f = Math.max(0, c.f0 - 6), k = Math.floor(rnd() * to.length);
@@ -56,7 +57,7 @@ function holdHead(name, f) { A.applyFrame(f); const e = by(name), keys = [];
   T('set_keyframes').execute({ character: name, keys }); }
 
 // 6. hands: the speaker lifts a hand as a thought begins
-for (const [i, l] of data.lines.entries()) { const c = cues[i], cfg = data.cast[l.speaker] || {}; if (!cfg.hand || !cfg.handBase) continue;
+for (const [i, l] of data.lines.entries()) { if (l.narration) continue; const c = cues[i], cfg = data.cast[l.speaker] || {}; if (!cfg.hand || !cfg.handBase) continue;
   const beats = []; for (let f = c.f0 + 8; f < c.f1 - 30; f += Math.round(fps * (3.5 + rnd() * 3))) beats.push(f);
   for (const f of beats) { const up = cfg.handBase.map((v, k) => v + (cfg.handLift || [0, .1, 0])[k] * (.7 + rnd() * .6));
     reach(l.speaker, cfg.hand, cfg.handBase, f - 8, cfg.pole); reach(l.speaker, cfg.hand, up, f + 2, cfg.pole); reach(l.speaker, cfg.hand, up.map((v, k) => v + (k === 1 ? -.02 : 0)), f + 16, cfg.pole); reach(l.speaker, cfg.hand, cfg.handBase, f + 30, cfg.pole); } }
@@ -65,7 +66,11 @@ for (const [i, l] of data.lines.entries()) { const c = cues[i], cfg = data.cast[
 const shots = [];
 const addShot = (f, cam) => { if (shots.length && shots[shots.length - 1].f >= f) return; if (shots.length && shots[shots.length - 1].cam === cam) return; shots.push({ f, cam }); };
 for (const s of data.openingShots || []) addShot(s.f, s.cam);
-for (const [i, l] of data.lines.entries()) { const c = cues[i], main = data.shotFor[l.speaker] || 'wide', cuts = data.cutaways[l.speaker] || ['wide'];
+for (const [i, l] of data.lines.entries()) { const c = cues[i];
+  if (l.narration) {   // while the narrator sets the scene, the camera looks around it
+    const list = (data.narrationShots && (data.narrationShots[c.id] || data.narrationShots.default)) || ['wide'], each = (c.f1 - c.f0 + F(l.gap ?? data.gap)) / list.length;
+    list.forEach((cam, k) => addShot(Math.max(0, Math.round(c.f0 - (k ? 0 : 4) + k * each)), cam)); continue; }
+  const main = data.shotFor[l.speaker] || 'wide', cuts = data.cutaways[l.speaker] || ['wide'];
   addShot(Math.max(0, c.f0 - 4), main);
   const dur = c.f1 - c.f0;
   if (dur > fps * 9) { const n = dur > fps * 22 ? 2 : 1;
@@ -78,8 +83,8 @@ for (const [i, s] of shots.entries()) { const end = (shots[i + 1] ? shots[i + 1]
   A.ctx.camKeys.push({ f: s.f, p: c.p.slice(), t: c.t.slice(), fov: c.fov, fstop: c.fstop });
   if (end > s.f) A.ctx.camKeys.push({ f: end, p: p1, t: c.t.slice(), fov: c.fov, fstop: c.fstop }); }
 A.applyFrame(0);
-log.push({ length, seconds: +(length / fps).toFixed(1), shots: shots.length, cues: cues.map(c => [c.n, c.t]) });
+log.push({ length, seconds: +(length / fps).toFixed(1), shots: shots.length, cues: cues.map(c => [c.id, c.t]) });
 // who is speaking when, and where their head is: the renderer lights the speaker's outline from behind
-const speakers = cues.map(c => ({ n: c.n, f0: c.f0, f1: c.f1, head: headOf2(c.speaker, Math.min(length, c.f0 + 12)).map(v => +v.toFixed(3)) }));
+const speakers = cues.filter(c => !c.narration).map(c => ({ n: c.n, f0: c.f0, f1: c.f1, head: headOf2(c.speaker, Math.min(length, c.f0 + 12)).map(v => +v.toFixed(3)) }));
 A.applyFrame(0);
-window.__film = { length, cues: cues.map(c => ({ n: c.n, t: c.t })), shots, speakers };
+window.__film = { length, cues: cues.map(c => ({ id: c.id, n: c.n, t: c.t })), shots, speakers };

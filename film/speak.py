@@ -1,7 +1,16 @@
-"""Rigroom voices: speaks a script's lines with Chatterbox (https://github.com/resemble-ai/chatterbox).
+"""Rigroom voices: speaks a script's lines with Chatterbox (https://github.com/resemble-ai/chatterbox)
+or Kokoro (https://github.com/thewh1teagle/kokoro-onnx), chosen per character in VOICES.json:
+
+    "Socrates": { "pitch": 98, "exaggeration": 0.55 }                    Chatterbox, a designed voice
+    "Aria":     { "engine": "kokoro", "voice": "af_heart" }              one of Kokoro's built-in voices
+    "Narrator": { "engine": "kokoro", "voice": "bf_emma", "lang": "en-gb" }
+
+A character called Narrator in VOICES.json reads the stage directions: the script's act and scene
+headings and the directions between lines. The two engines need different Python packages, so each
+run speaks the lines of one engine (--engine).
 
     python speak.py voices SCRIPT.json VOICES.json REF_DIR OUT_DIR
-    python speak.py lines  SCRIPT.json VOICES.json PROMPT_DIR OUT_DIR [--part I/N] [--only A-B] [--speaker NAME]
+    python speak.py lines  SCRIPT.json VOICES.json PROMPT_DIR OUT_DIR [--engine chatterbox|kokoro] [--part I/N] [--only A-B] [--speaker NAME]
 
 Every character needs a short reference clip that sets what its voice sounds like.
   - If REF_DIR holds "<Character>.wav" (a recording you made, 8 to 20 seconds), that is the voice.
@@ -93,6 +102,57 @@ def heard(wav, sr, text):
         return 1.0
 
 
+ORDINAL = {'I': 'one', 'II': 'two', 'III': 'three', 'IV': 'four', 'V': 'five', '1': 'one', '2': 'two', '3': 'three', '4': 'four', '5': 'five'}
+
+
+def heading(h):
+    """'ACT II: THE BOTANICAL AGORA' as a narrator says it: 'Act two. The Botanical Agora.'"""
+    m = re.match(r'^(ACT|SCENE) (\w+): (.+)$', h or '')
+    if not m:
+        return ''
+    small = {'of', 'the', 'to', 'a', 'an', 'in', 'and'}
+    words = [w.capitalize() if i == 0 or w.lower() not in small else w.lower() for i, w in enumerate(m.group(3).split())]
+    return '%s %s. %s.' % (m.group(1).capitalize(), ORDINAL.get(m.group(2), m.group(2)), ' '.join(words))
+
+
+def items_of(script, voices):
+    """Everything to be spoken, in order: each line (id '007'), and, when there is a Narrator, the stage
+    directions before it (id '007n') and after the last line ('999n')."""
+    out, narr, act, scene = [], 'Narrator' in voices, None, None
+    for l in script['lines']:
+        if narr:
+            said = []
+            if l.get('act') != act:
+                said.append(heading(l.get('act')))
+            if l.get('scene') and l.get('scene') != scene:
+                said.append(heading(l.get('scene')))
+            said += [d.replace('\u201c', '').replace('\u201d', '').replace('\u2014', ', ') for d in l.get('before') or []]
+            said = ' '.join(x for x in said if x)
+            said = re.sub(r"\b[A-Z][A-Z']+\b", lambda m: m.group(0).capitalize(), said)   # names in capitals are read as words, not spelled
+            if said:
+                out.append({'id': '%03dn' % l['n'], 'n': l['n'], 'speaker': 'Narrator', 'say': said, 'narration': True})
+        act, scene = l.get('act'), l.get('scene')
+        out.append({'id': '%03d' % l['n'], 'n': l['n'], 'speaker': l['speaker'], 'say': l['say']})
+    if narr and script.get('after'):
+        out.append({'id': '999n', 'n': 999, 'speaker': 'Narrator', 'say': re.sub(r"\b[A-Z][A-Z']+\b", lambda m: m.group(0).capitalize(), ' '.join(script['after'])), 'narration': True})
+    return out
+
+
+_kokoro = None
+
+
+def kokoro_say(text, voice):
+    global _kokoro
+    if _kokoro is None:
+        from kokoro_onnx import Kokoro
+        home = os.environ.get('KOKORO_DIR', '.')
+        _kokoro = Kokoro(os.path.join(home, 'kokoro-v1.0.onnx'), os.path.join(home, 'voices-v1.0.bin'))
+    name = voice.get('voice', 'af_heart')
+    lang = voice.get('lang') or ('en-gb' if name[:1] == 'b' else 'en-us')
+    wav, _ = _kokoro.create(text, voice=name, speed=float(voice.get('speed', 1.0)), lang=lang)
+    return np.asarray(wav, dtype=np.float32)
+
+
 def passages(text, limit=260):
     """Split a line into sentences and pack them into passages short enough to speak in one go."""
     parts = [p.strip() for p in re.split(r'(?<=[.!?;:])\s+', text) if p.strip()]
@@ -123,6 +183,9 @@ def make_voices(args):
     for c in script['cast']:
         name = c['name']
         v = {**DEFAULT_VOICE, **voices.get(name, {})}
+        if v.get('engine') == 'kokoro':
+            report[name] = {'source': 'Kokoro voice ' + v.get('voice', 'af_heart')}
+            continue
         ref = os.path.join(args.ref, name + '.wav')
         dst = os.path.join(args.out, name + '.wav')
         if os.path.exists(ref):
@@ -161,7 +224,8 @@ def speak_lines(args):
     script = json.load(open(args.script, encoding='utf-8'))
     voices = json.load(open(args.voices, encoding='utf-8'))
     os.makedirs(args.out, exist_ok=True)
-    lines = script['lines']
+    engine_of = lambda who: voices.get(who, {}).get('engine', 'chatterbox')
+    lines = [l for l in items_of(script, voices) if engine_of(l['speaker']) == args.engine]
     if args.only:
         a, b = (int(x) for x in args.only.split('-'))
         lines = [l for l in lines if a <= l['n'] <= b]
@@ -171,16 +235,17 @@ def speak_lines(args):
     # spread the work by length, so every machine speaks about the same amount
     order = sorted(lines, key=lambda l: -len(l['say']))
     mine = sorted(order[i - 1::n], key=lambda l: (l['speaker'], l['n']))
+    part_file = os.path.join(args.out, 'part-%s.json' % args.engine)
     if not mine:
-        json.dump([], open(os.path.join(args.out, 'part.json'), 'w'))
+        json.dump([], open(part_file, 'w'))
         return
-    model = load_model()
-    sr = model.sr
+    model = load_model() if args.engine == 'chatterbox' else None
+    sr = model.sr if model else 24000
     gap = np.zeros(int(sr * 0.26), dtype=np.float32)
     done, current = [], None
     for l in mine:
         v = {**DEFAULT_VOICE, **voices.get(l['speaker'], {})}
-        if current != l['speaker']:
+        if model and current != l['speaker']:
             model.prepare_conditionals(os.path.join(args.prompts, l['speaker'] + '.wav'), exaggeration=float(v['exaggeration']))
             current = l['speaker']
         pieces, worst = [], 1.0
@@ -188,21 +253,22 @@ def speak_lines(args):
             words = max(1, len(text.split()))
             best = None
             for attempt in range(4):               # a take with wrong words, or far too long or short, is a slip: try again
-                wav = tidy(speak(model, text, v, 1000 * l['n'] + 10 * k + attempt), sr)
+                wav = tidy(speak(model, text, v, 1000 * l['n'] + 10 * k + attempt) if model else kokoro_say(text, v), sr)
                 pace = len(wav) / sr / words
                 match = heard(wav, sr, text)
                 score = (1 - match) * 4 + abs(math.log(max(pace, 1e-3) / 0.38))
                 if best is None or score < best[0]:
                     best = (score, wav, pace, match)
-                if match >= 0.9 and 0.2 <= pace <= 0.75:
+                if (match >= 0.9 and 0.2 <= pace <= 0.75) or not model:   # Kokoro gives the same take every time
                     break
             pieces.append(best[1])
             worst = min(worst, best[3])
-            print('line %d.%d %s: %.1f s, %.2f s a word, heard %.0f%%, takes %d' % (l['n'], k, l['speaker'], len(best[1]) / sr, best[2], best[3] * 100, attempt + 1), flush=True)
+            print('line %s.%d %s: %.1f s, %.2f s a word, heard %.0f%%, takes %d' % (l['id'], k, l['speaker'], len(best[1]) / sr, best[2], best[3] * 100, attempt + 1), flush=True)
         wav = np.concatenate([x for p in pieces for x in (p, gap)][:-1])
-        write(os.path.join(args.out, '%03d.wav' % l['n']), wav, sr)
-        done.append({'n': l['n'], 'speaker': l['speaker'], 'seconds': round(len(wav) / sr, 3), 'passages': len(pieces), 'heard': round(worst, 2)})
-    json.dump(done, open(os.path.join(args.out, 'part.json'), 'w'))
+        write(os.path.join(args.out, l['id'] + '.wav'), wav, sr)
+        done.append({'id': l['id'], 'n': l['n'], 'speaker': l['speaker'], 'seconds': round(len(wav) / sr, 3), 'passages': len(pieces), 'heard': round(worst, 2),
+                     **({'narration': True} if l.get('narration') else {})})
+    json.dump(done, open(part_file, 'w'))
 
 
 def main():
@@ -212,7 +278,7 @@ def main():
     a.add_argument('script'); a.add_argument('voices'); a.add_argument('ref'); a.add_argument('out')
     b = sub.add_parser('lines')
     b.add_argument('script'); b.add_argument('voices'); b.add_argument('prompts'); b.add_argument('out')
-    b.add_argument('--part', default='1/1'); b.add_argument('--only', default=''); b.add_argument('--speaker', default='')
+    b.add_argument('--part', default='1/1'); b.add_argument('--only', default=''); b.add_argument('--speaker', default=''); b.add_argument('--engine', default='chatterbox', choices=['chatterbox', 'kokoro'])
     args = ap.parse_args()
     make_voices(args) if args.cmd == 'voices' else speak_lines(args)
 

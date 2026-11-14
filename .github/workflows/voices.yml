@@ -125,13 +125,21 @@ jobs:
           key: speech-models-v1
       - name: Install Chatterbox
         run: pip install -q -r app/film/requirements.txt
+      - name: Install Kokoro
+        run: |
+          # Kokoro needs newer packages than Chatterbox, so it gets its own environment
+          python -m venv kv && kv/bin/pip install -q kokoro-onnx soundfile librosa faster-whisper
+          mkdir -p "$HOME/kokoro" && cd "$HOME/kokoro"
+          for f in kokoro-v1.0.onnx voices-v1.0.bin; do curl -sSL --retry 3 -o "$f" "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/$f"; done
       - name: Speak the lines
         env:
           PART: ${{ matrix.part }}
           PARTS: ${{ inputs.parts }}
         run: |
-          python app/film/speak.py lines prompts/script.json prompts/voices.json prompts spoken --part "$PART/$PARTS" ${ONLY:+--only "$ONLY"} ${SPEAKER:+--speaker "$SPEAKER"} > speak.log 2>&1 || { tail -30 speak.log; exit 1; }
-          grep -E "^line [0-9]+\.[0-9]+ [A-Za-z ]+: [0-9.]+ s" speak.log | sed -E 's/^(line [0-9.]+) [A-Za-z ]+:/\1:/'
+          OPTS=(--part "$PART/$PARTS" ${ONLY:+--only "$ONLY"} ${SPEAKER:+--speaker "$SPEAKER"})
+          python app/film/speak.py lines prompts/script.json prompts/voices.json prompts spoken --engine chatterbox "${OPTS[@]}" > speak.log 2>&1 || { tail -30 speak.log; exit 1; }
+          KOKORO_DIR="$HOME/kokoro" kv/bin/python app/film/speak.py lines prompts/script.json prompts/voices.json prompts spoken --engine kokoro "${OPTS[@]}" >> speak.log 2>&1 || { tail -30 speak.log; exit 1; }
+          grep -E "^line [0-9n]+\.[0-9]+ [A-Za-z ]+: [0-9.]+ s" speak.log | sed -E 's/^(line [0-9n.]+) [A-Za-z ]+:/\1:/'
       - name: Pack the audio
         env:
           KEY: ${{ secrets.STUDIO_TOKEN }}
