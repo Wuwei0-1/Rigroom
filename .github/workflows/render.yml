@@ -99,6 +99,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
+      # GitHub runs 20 jobs at once for free: leaving 2 free lets other renders plan and publish meanwhile
+      max-parallel: 18
       matrix:
         chunk: ${{ fromJSON(needs.plan.outputs.chunks) }}
     steps:
