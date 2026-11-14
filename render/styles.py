@@ -8,6 +8,9 @@ A job's "style" picks how the same scene is drawn:
     cel           cartoon: the people's own colours in flat bands of light and shade, with ink outlines
     sketch        pencil on paper: graphite lines and hatched shadows
     clay          a matte clay maquette under the scene's lights
+    edward        Edward's style (from his booth storyboard): a grey page, the set laid in with blue construction
+                  lines that overshoot their corners and show through the figures, the people drawn over it in loose
+                  charcoal with hatching on dark clothes; the speaker is drawn with a heavier line
 
 Every style but photoreal is drawn with Eevee, which is many times faster. "style_colors" in the job
 can set a character's outline colour: { "Socrates": "#ffc04d" }.
@@ -18,7 +21,7 @@ import bpy
 
 from surfaces import Graph, hex_to_linear
 
-STYLES = ('photoreal', 'black-figure', 'cel', 'sketch', 'clay')
+STYLES = ('photoreal', 'black-figure', 'cel', 'sketch', 'clay', 'edward')
 NEON = {'Socrates': '#ffc04d', 'Aria': '#3fe0ff', 'Cleon': '#ff3fa4', 'Julian': '#9dff5a'}
 EXTRA = ['#ffd1f5', '#ffe08a', '#8ad9ff', '#c9ff8a']
 
@@ -159,10 +162,10 @@ def lines_on(scene):
     return fs
 
 
-def lineset(fs, name, coll, colour, thickness, alpha=1.0, crease=False, edges=('silhouette', 'border'), sketchy=0.0, min_length=0.0):
+def lineset(fs, name, coll, colour, thickness, alpha=1.0, crease=False, edges=('silhouette', 'border'), sketchy=0.0, min_length=0.0, hidden=False, overshoot=0.0):
     ls = fs.linesets.new(name)
     ls.select_by_visibility = True
-    ls.visibility = 'VISIBLE'
+    ls.visibility = 'HIDDEN' if hidden else 'VISIBLE'
     ls.select_by_edge_types = True
     for k in ('silhouette', 'border', 'crease', 'contour', 'external_contour', 'material_boundary'):
         setattr(ls, 'select_' + k, k in edges or (k == 'crease' and crease))
@@ -178,16 +181,20 @@ def lineset(fs, name, coll, colour, thickness, alpha=1.0, crease=False, edges=('
     if min_length:   # scans are full of tiny folds: strokes shorter than this are left out
         st.use_length_min = True
         st.length_min = min_length
-    if sketchy:
+    # Freestyle's backbone stretcher can fail on strokes made by sketchy chaining, and a failure drops the whole
+    # line set from that frame: so a line set either goes over its strokes several times, or runs them on, never both
+    if sketchy and not overshoot:
         st.use_chaining = True
         st.chaining = 'SKETCHY'
         st.rounds = 3
+    if sketchy:
         n = st.geometry_modifiers.new('Wobble', 'PERLIN_NOISE_1D')
         n.frequency, n.amplitude = 4.0, sketchy
-        st.geometry_modifiers.new('Overshoot', 'BACKBONE_STRETCHER').backbone_length = 5.0
         t = st.thickness_modifiers.new('Pressure', 'ALONG_STROKE')
         t.mapping = 'CURVE'
         t.influence = 0.8
+    if overshoot:   # construction lines run on past the corner, as a ruler stroke does
+        st.geometry_modifiers.new('Run on', 'BACKBONE_STRETCHER').backbone_length = overshoot
     ls.linestyle = st
     return ls
 
@@ -393,6 +400,53 @@ def clay(scene, job, people, props, floor):
     scene.view_settings.exposure = -0.6
 
 
+def edward(scene, job, people, props, floor):
+    PAGE, CHARCOAL, BLUE = hex_to_linear('#8b8b8b'), hex_to_linear('#1c1c1e'), hex_to_linear('#2b59d9')
+    world_colour(scene, PAGE, PAGE)
+    page = flat('Edward page', PAGE)
+
+    def hatched(name, img):
+        """The page, with charcoal hatching where the scan's clothes or hair are dark."""
+        mat, g, out = fresh(name)
+        t = g.new('ShaderNodeTexImage')
+        t.image = img
+        g.set(t.inputs['Vector'], g.new('ShaderNodeUVMap').outputs['UV'])
+        bw = g.new('ShaderNodeRGBToBW')
+        g.set(bw.inputs[0], t.outputs['Color'])
+        dark = g.remap(bw.outputs[0], 0.16, 0.06, smooth=True)
+        wave = g.new('ShaderNodeTexWave', wave_type='BANDS', bands_direction='DIAGONAL')
+        g.set(wave.inputs['Vector'], g.new('ShaderNodeTexCoord').outputs['Window'])
+        wave.inputs['Scale'].default_value = 90.0
+        wave.inputs['Distortion'].default_value = 2.5
+        wave.inputs['Detail'].default_value = 1.0
+        strokes = g.remap(wave.outputs['Fac'], 0.82, 0.97)
+        e = g.new('ShaderNodeEmission')
+        g.set(e.inputs['Color'], g.mix(g.math('MULTIPLY', g.math('MULTIPLY', dark, strokes), 0.75), PAGE, CHARCOAL))
+        g.set(out.inputs['Surface'], e.outputs[0])
+        return mat
+
+    for obs in people.values():
+        for ob in obs:
+            for j, m in enumerate(ob.data.materials):
+                img = scan_texture(m)
+                ob.data.materials[j] = hatched('Edward ' + ob.name + str(j), img) if img else page
+    for ob, kind, m in props:
+        setmat(ob, page)
+    if floor:
+        setmat(floor, page)
+    fs = lines_on(scene)
+    fs.crease_angle = math.radians(134)
+    setobs = [ob for ob, k, m in props]
+    setcoll = group('Set', setobs)
+    # the set: blue ruler lines that run past their corners, and fainter where they pass behind things
+    lineset(fs, 'Set blue', setcoll, BLUE, 2.2, 1.0, crease=True, sketchy=0.6, overshoot=14.0, min_length=6)
+    lineset(fs, 'Set blue behind', setcoll, BLUE, 1.5, 0.4, crease=False, overshoot=10.0, min_length=12, hidden=True)
+    cues = speaking(job)
+    for who, obs in sorted(people.items()):
+        ls = lineset(fs, who + ' charcoal', group('Figure ' + who, obs), CHARCOAL, 2.6, 1.0, crease=True, sketchy=1.2, min_length=12)
+        key_emphasis(ls.linestyle, cues, who, 2.6, 3.8, 'thickness')
+
+
 def apply(scene, job):
     """Change the built scene to the job's style. Returns the style used."""
     style = job.get('style') or 'photoreal'
@@ -405,6 +459,6 @@ def apply(scene, job):
     if haze:
         bpy.data.objects.remove(haze)
     use_eevee(scene, job)
-    {'black-figure': black_figure, 'cel': cel, 'sketch': sketch, 'clay': clay}[style](scene, job, people, props, floor)
+    {'black-figure': black_figure, 'cel': cel, 'sketch': sketch, 'clay': clay, 'edward': edward}[style](scene, job, people, props, floor)
     print('style %s: %d characters (%s), %d props' % (style, len(people), ', '.join(sorted(people)), len(props)), flush=True)
     return style

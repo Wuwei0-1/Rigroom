@@ -68,6 +68,7 @@ The same scene can be rendered in different looks: Project → Render server →
 | Cel | A cartoon: the people's own colours in flat bands, ink outlines | about 3× faster |
 | Sketch | A pencil drawing on paper | about 3× faster |
 | Clay | A matte clay maquette under the scene's lights | about 4× faster |
+| Edward's style | Edward's storyboard look: a grey page, the set ruled in with blue construction lines that run past their corners and show through the figures, the people drawn over it in loose charcoal with hatching on dark clothes; the speaker gets a heavier line | about 3× faster |
 
 **Quality** scales the size (Preview 640 px up to Final 1920 px), and **Motion → On twos** renders every second frame and holds it, as hand-drawn animation does, for half the time. Styles other than Photoreal are drawn with Eevee (`render/styles.py`); a job sets `style`, and `style_colors` can change a character's outline colour.
 
@@ -83,6 +84,7 @@ A render job can also render a Blender file kept in the studio, exactly as it wa
 2. The **Voices** workflow (inputs `film=<id>`, optional `lines=1-9`) speaks every line with [Chatterbox](https://github.com/resemble-ai/chatterbox) and writes `film/<id>/audio/NNN.mp3` and `audio.json` (lengths and loudness curves). Each character's voice comes from a reference clip, `film/<id>/voices/<Character>.wav`: record 8 to 20 seconds yourself, or let the workflow design one (the built-in voice shifted to the pitch set in `voices.json`, belonging to no real person). A speech recogniser listens to every take and bad takes are redone.
 3. `film/director.js` runs inside the app on a posed scene and keys it from the audio: jaws from loudness, blinks, who looks at whom, breathing, hand gestures, and one camera per shot with cuts on the lines.
 4. The scene goes to the render server as a job with `audio` (which lines start when) and `speaker_light` (who speaks when): the result is an MP4 with the voices mixed in, and whoever is speaking is lit from behind so their outline glows.
+5. `python3 film/assemble.py FILM.mp4 [--size 1280x720] [--fps 24] PART...` joins the rendered parts into one film. A part is a video, `card:Title|Subtitle` (a 5-second title card) or `end:Text` (a 4-second end card); every part is fitted to one size and frame rate, and silent parts get a silent track, so chapters made in different styles or sizes join cleanly.
 
 ## Studio
 

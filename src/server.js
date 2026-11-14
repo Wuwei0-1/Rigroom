@@ -9,7 +9,7 @@ const $ = s => document.querySelector(s);
 const WORKFLOW = 'render.yml';
 const QUALITY = { preview: { width: 640, samples: 16 }, draft: { width: 960, samples: 48 }, good: { width: 1280, samples: 128 }, final: { width: 1920, samples: 400 } };
 // how the scene is drawn (render/styles.py); every style but photoreal draws many times faster
-export const STYLES = { photoreal: 'Photoreal', 'black-figure': 'Black-figure (Chapter 1)', cel: 'Cel (cartoon)', sketch: 'Sketch (pencil)', clay: 'Clay' };
+export const STYLES = { photoreal: 'Photoreal', 'black-figure': 'Black-figure (Chapter 1)', cel: 'Cel (cartoon)', sketch: 'Sketch (pencil)', clay: 'Clay', edward: "Edward's style" };
 for (const [id, key] of [['srvStyle', 'rigroom.renderStyle'], ['srvQuality', 'rigroom.renderQuality'], ['srvStep', 'rigroom.renderStep']]) {
   const el = $('#' + id); try { const v = localStorage.getItem(key); if (v && [...el.options].some(o => o.value === v)) el.value = v; } catch (e) { /* storage unavailable */ }
   el.addEventListener('change', () => { try { localStorage.setItem(key, el.value); } catch (e) { /* storage unavailable */ } });
