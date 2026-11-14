@@ -190,6 +190,9 @@ function findFingers(map, S) {
   if (!idx || !pin) return out;
   // the palm faces away from the back of the hand, which the spread of the knuckles gives
   const hp = P(hand), palm = P(idx).sub(hp).cross(P(pin).sub(hp)).normalize(); if (S === 'L') palm.negate();
+  // where a held thing sits: the middle of the palm, with the directions of the palm and the fingers, in the hand's own space
+  { const mid = P(idx).add(P(pin)).multiplyScalar(.5), fin = mid.clone().sub(hp).normalize(), n = palm.clone().addScaledVector(fin, -palm.dot(fin)).normalize(), inv = hand.getWorldQuaternion(new Q4()).invert();
+    out.palm = { bone: hand, pos: hand.worldToLocal(hp.clone().lerp(mid, .8)), n: n.applyQuaternion(inv), f: fin.applyQuaternion(inv) }; }
   for (const root of roots) {
     let bone = root, j = 0; const kind = fingerKind(root.name);
     while (bone && j < 3) {
@@ -210,6 +213,37 @@ function applyHands(e) {
 export function setHands(e, hands) {
   const H = { ...(e.params.hands || {}) }; for (const S of ['L', 'R']) if (hands && HAND_POSES.includes(hands[S])) H[S] = hands[S];
   e.params.hands = H; applyHands(e); if (e.look) retarget(e);
+}
+/* holding: a prop can ride in a character's hand */
+function palmOf(e, S) {   // the palm right now, in scene space: its middle, the way it faces, the way the fingers point
+  const out = { pos: new V3(), n: new V3(), f: new V3() }, p = e.look && e.look.palm && e.look.palm[S];
+  if (p) { p.bone.updateWorldMatrix(true, false); const q = p.bone.getWorldQuaternion(new Q4()); out.pos.copy(p.pos).applyMatrix4(p.bone.matrixWorld); out.n.copy(p.n).applyQuaternion(q); out.f.copy(p.f).applyQuaternion(q); return out; }
+  const b = e.byName.get('hand_' + S); if (!b) return null; b.obj.updateWorldMatrix(true, false); const q = b.obj.getWorldQuaternion(new Q4()), s = S === 'L' ? 1 : -1;
+  out.pos.set(s * .07, -.015, 0).applyMatrix4(b.obj.matrixWorld); out.n.set(0, -1, 0).applyQuaternion(q); out.f.set(s, 0, 0).applyQuaternion(q); return out;
+}
+const holder = e => { const h = e.kind === 'prop' && e.params.hold; return h ? ents.find(x => x.name === h.by && x.kind === 'mannequin') : null; };
+function applyHolds() {
+  for (const e of ents) { const c = holder(e); if (!c) continue; const palm = palmOf(c, e.params.hold.hand); if (!palm) continue;
+    const s = e.params.size, n = palm.n.normalize(), f = palm.f.addScaledVector(n, -palm.f.dot(n)).normalize(), across = new V3().crossVectors(n, f), m = new THREE.Matrix4(); let off;
+    if (e.params.shape !== 'box') { m.makeBasis(n, across, new V3().crossVectors(n, across)); off = s[0] / 2 + .004; }   // a cup or ball: its axis lies across the palm
+    else { let t = s.indexOf(Math.min(...s)), l = s.indexOf(Math.max(...s)); if (l === t) l = (t + 1) % 3; const k = 3 - t - l, col = [];   // a flat thing lies on the palm, its length along the fingers
+      col[t] = n.clone(); col[l] = f.clone(); col[k] = new V3().crossVectors(col[(k + 1) % 3], col[(k + 2) % 3]); m.makeBasis(col[0], col[1], col[2]); off = s[t] / 2 + .008; }
+    e.group.quaternion.setFromRotationMatrix(m); e.group.position.copy(palm.pos).addScaledVector(n, off).addScaledVector(f, .02); }
+}
+/** Give a prop to a character's hand ('L' or 'R'), or take it back with by = null. */
+export function setHold(e, by, hand) {
+  if (!by) { delete e.params.hold; applyPlacement(e); return; }
+  e.params.hold = { by: by.name, hand }; setHands(by, { [hand]: 'grip' }); applyHolds();
+}
+/** Turn a hand so its palm faces a scene point at a frame (reading a phone, showing a paper). Keys the hand bone. */
+export function aimPalm(e, S, target, f) {
+  const b = e.byName.get('hand_' + S); if (!b) return; evaluateEnt(e, f); e.group.updateMatrixWorld(true);
+  const s = S === 'L' ? 1 : -1, G = e.group.getWorldQuaternion(new Q4()), pos = b.obj.getWorldPosition(new V3()), n = new V3(...target).sub(pos).normalize();
+  const fd = new V3(s, 0, 0).applyQuaternion(b.obj.getWorldQuaternion(new Q4())); fd.addScaledVector(n, -fd.dot(n)); if (fd.lengthSq() < 1e-4) fd.set(0, 1, 0).addScaledVector(n, -n.y); fd.normalize();
+  const rf = new V3(s, 0, 0).applyQuaternion(G), rn = new V3(0, -1, 0).applyQuaternion(G);
+  const rest = new THREE.Matrix4().makeBasis(rf, rn, new V3().crossVectors(rf, rn)), want = new THREE.Matrix4().makeBasis(fd, n, new V3().crossVectors(fd, n));
+  const world = new Q4().setFromRotationMatrix(want.multiply(rest.transpose())).multiply(G), local = b.obj.parent.getWorldQuaternion(new Q4()).invert().multiply(world);
+  setKey(e, 'hand_' + S, f, rq(local.toArray()), null); evaluateEnt(e, f); applyHolds();
 }
 function attachLook(e) {
   const obj = instantiate(e.params.look);
@@ -236,6 +270,7 @@ function attachLook(e) {
   e.group.traverse(o => { if (o.userData.mq) o.visible = false; });
   const hips = e.byName.get('hips');
   e.look = { wrap, entries, hips: { dst: map.hips, restChar: P(map.hips), src: hips, srcRest: hips.restWP.clone() }, fingers: { L: findFingers(map, 'L'), R: findFingers(map, 'R') } };
+  e.look.palm = { L: e.look.fingers.L.palm, R: e.look.fingers.R.palm };
   e.lookMissing = false;
   applyHands(e); retarget(e);
 }
@@ -510,7 +545,7 @@ async function keepMotions(res) {
   return { kept, failed };
 }
 export function evaluateEnt(e, f) { for (const b of e.bones) { const tr = e.tracks[b.name]; if (tr && tr.length) evalTrack(b, tr, f); } if (e.look) retarget(e); }
-function evaluate(f) { for (const e of ents) evaluateEnt(e, f); }
+function evaluate(f) { for (const e of ents) evaluateEnt(e, f); applyHolds(); }
 export function applyFrame(f) { frame = f; evaluate(f); updateFrameUI(); }
 function restEnt(e) { for (const b of e.bones) { b.obj.quaternion.copy(b.restQ); b.obj.position.copy(b.restP); } }
 
@@ -706,7 +741,11 @@ export function refreshStageUI() {
   show('propSizeRow', isProp); show('colorRow', hasMat); show('matRow', hasMat && !lit && !preset); show('matRow2', hasMat && !lit && !preset); show('matPickRow', isProp);
   show('facingRow', !lit); show('scaleRow', !lit); for (const id of ['lightTypeRow', 'lightPowerRow', 'lightSizeRow', 'lightAimRow']) show(id, lit); show('lightSpreadRow', lit && active.params.type === 'spot');
   $('#entNote').textContent = lit ? 'Use Place to move the light. It shines at the point you aim it at; the render server draws its real soft shadows.' : 'Use Place in the viewport to move it. Models can be .glb, or .gltf and .fbx picked together with their texture images.';
-  if (isProp) { ['pw', 'ph', 'pd'].forEach((id, i) => $('#' + id).value = active.params.size[i]); $('#matPick').value = active.params.mat || 'plain'; }
+  if (isProp) { ['pw', 'ph', 'pd'].forEach((id, i) => $('#' + id).value = active.params.size[i]); $('#matPick').value = active.params.mat || 'plain';
+    const hp = $('#holdPick'), h = active.params.hold; hp.textContent = ''; hp.append(new Option('Nobody', ''));
+    for (const c of ents) if (c.kind === 'mannequin') for (const S of ['L', 'R']) hp.append(new Option(c.name + (S === 'L' ? ' · left hand' : ' · right hand'), c.id + ':' + S));
+    const hc = h && ents.find(x => x.name === h.by); hp.value = hc ? hc.id + ':' + h.hand : ''; }
+  show('holdRow', isProp);
   if (lit) { const p = active.params; $('#lightType').value = p.type; $('#lightPower').value = p.power; $('#lightPowerV').textContent = Math.round(p.power) + ' W'; $('#lightSize').value = Math.round(p.lsize * 100); $('#lightSizeV').textContent = Math.round(p.lsize * 100) + ' cm';
     $('#lightSpread').value = p.spread; $('#lightSpreadV').textContent = Math.round(p.spread) + '°';
     const pick = $('#lightAim'); pick.textContent = ''; pick.append(new Option(p.target ? 'Aimed at ' + p.target.map(r1).join(', ') : 'Aimed straight down', ''), new Option('Straight down', 'down'));
@@ -714,7 +753,7 @@ export function refreshStageUI() {
   if (hasMat) { $('#entColor').value = active.params.color || '#ffffff'; $('#matRough').value = Math.round(active.params.rough * 100); $('#matRoughV').textContent = Math.round(active.params.rough * 100) + '%'; $('#matMetal').value = Math.round(active.params.metal * 100); $('#matMetalV').textContent = Math.round(active.params.metal * 100) + '%'; }
   refreshHeader();
 }
-$('#entName').onchange = e => { if (!active) return; const v = e.target.value.trim(); if (!v) return refreshStageUI(); pushUndo(); active.name = uniqueName(v.slice(0, 40), active); refreshStageUI(); select(sel); changed(); };
+$('#entName').onchange = e => { if (!active) return; const v = e.target.value.trim(); if (!v) return refreshStageUI(); pushUndo(); const old = active.name; active.name = uniqueName(v.slice(0, 40), active); for (const p of ents) if (p.params.hold && p.params.hold.by === old) p.params.hold.by = active.name; refreshStageUI(); select(sel); changed(); };
 let placing = false;
 const placeBegin = () => { if (!placing) { placing = true; pushUndo(); } };
 $('#entFacing').addEventListener('input', e => { if (!active) return; placeBegin(); active.rot[1] = +e.target.value; applyPlacement(active); $('#entFacingV').textContent = e.target.value + '°'; });
@@ -722,6 +761,8 @@ $('#entSize').addEventListener('input', e => { if (!active) return; placeBegin()
 $('#matRough').addEventListener('input', e => { if (!active || active.kind === 'import') return; placeBegin(); active.params.rough = +e.target.value / 100; applyMaterial(active); $('#matRoughV').textContent = e.target.value + '%'; });
 $('#matMetal').addEventListener('input', e => { if (!active || active.kind === 'import') return; placeBegin(); active.params.metal = +e.target.value / 100; applyMaterial(active); $('#matMetalV').textContent = e.target.value + '%'; });
 ['entFacing', 'entSize', 'matRough', 'matMetal'].forEach(id => $('#' + id).addEventListener('change', () => { placing = false; changed(); }));
+$('#holdPick').onchange = ev => { if (!active || active.kind !== 'prop' || isLight(active)) return; pushUndo(); const [id, S] = ev.target.value.split(':'), c = ents.find(x => String(x.id) === id);
+  setHold(active, c || null, S); evaluate(frame); refreshStageUI(); changed(); if (c) toast(c.name + ' holds ' + active.name + '. Pose the hand and it comes along.'); };
 $('#matPick').onchange = e => { if (!active || active.kind !== 'prop' || isLight(active)) return; pushUndo(); active.params.mat = e.target.value; refreshProp(active); refreshStageUI(); changed(); };
 $('#lightType').onchange = e => { if (!isLight(active)) return; pushUndo(); active.params.type = e.target.value; refreshProp(active); refreshStageUI(); changed(); };
 for (const [id, key, div, unit] of [['lightPower', 'power', 1, ' W'], ['lightSize', 'lsize', 100, ' cm'], ['lightSpread', 'spread', 1, '°']]) {
@@ -901,6 +942,7 @@ $('#saveBtn').onclick = () => saveFile('rigroom-project.json', JSON.stringify(sc
 function bakeClip() {
   const list = []; for (const e of ents) for (const n of Object.keys(e.tracks)) { const b = e.byName.get(n); if (b) list.push({ obj: b.obj, Q: [], P: b.isRoot ? [] : null }); }
   for (const e of ents) if (e.look) for (const m of e.look.entries) list.push({ obj: m.dst, Q: [], P: m.dst === e.look.hips.dst ? [] : null });
+  for (const e of ents) if (holder(e)) list.push({ obj: e.group, Q: [], P: [] });   // a held prop travels with the hand
   const times = [];
   for (let f = 0; f <= anim.length; f++) { evaluate(f); times.push(f / anim.fps); for (const x of list) { x.Q.push(...x.obj.quaternion.toArray()); if (x.P) x.P.push(...x.obj.position.toArray()); } }
   const tracks = []; for (const x of list) { tracks.push(new THREE.QuaternionKeyframeTrack(x.obj.uuid + '.quaternion', times, x.Q)); if (x.P) tracks.push(new THREE.VectorKeyframeTrack(x.obj.uuid + '.position', times, x.P)); }
@@ -954,6 +996,7 @@ export function writeKey(e, b, f, rot, pos) {
 function entInfo(e) { if (isLight(e)) { const p = e.params; return { name: e.name, kind: 'light', type: p.type, position: e.pos.map(r2), target: p.target ? p.target.map(r2) : 'straight down', power_watts: p.power, color: p.color, size: p.lsize, spread: p.type === 'spot' ? p.spread : undefined }; }
   const o = { name: e.name, kind: e.kind === 'prop' ? 'prop' : 'character', position: e.pos.map(r2) };
   if (e.kind === 'prop') { o.shape = e.params.shape; o.size = e.params.size.map(r2); o.rotation = e.rot.map(r1); } else { o.facing = r1(e.rot[1]); o.scale = r2(e.scale); o.rig = e.kind === 'mannequin' ? 'mannequin' : 'imported (' + e.bones.length + ' bones)'; }
+  if (e.kind === 'prop' && e.params.hold) o.held_by = e.params.hold.by + ' (' + (e.params.hold.hand === 'L' ? 'left' : 'right') + ' hand)';
   if (e.kind === 'prop' && e.params.mat !== 'plain') o.material = { preset: e.params.mat, color: e.params.color };
   else if (e.kind === 'prop' || (e.kind === 'mannequin' && !e.params.look)) o.material = { color: e.params.color, roughness: e.params.rough, metalness: e.params.metal };
   if (e.kind === 'mannequin') { o.look = e.params.look ? e.params.lookName : 'mannequin'; if (e.params.look) o.hands = { left: (e.params.hands && e.params.hands.L) || 'relaxed', right: (e.params.hands && e.params.hands.R) || 'relaxed' }; }
@@ -1032,7 +1075,7 @@ export const TOOLS = [
       if (e.kind === 'prop' && !isLight(e)) { if (num3(i.size)) e.params.size = i.size.map(v => clamp(Math.abs(v), .005, 50)); if (i.material in MATS) e.params.mat = i.material; }
       if (isLight(e)) { const p = e.params; if (num3(i.target)) p.target = i.target.map(Number); if (isFinite(i.power)) p.power = +i.power; if (LIGHT_TYPES.includes(i.light_type)) p.type = i.light_type; if (isFinite(i.light_size)) p.lsize = +i.light_size; if (isFinite(i.spread)) p.spread = +i.spread; }
       applyMaterial(e);
-      if (i.rename) e.name = uniqueName(String(i.rename).slice(0, 40), e);
+      if (i.rename) { const old = e.name; e.name = uniqueName(String(i.rename).slice(0, 40), e); for (const p of ents) if (p.params.hold && p.params.hold.by === old) p.params.hold.by = e.name; }
       act('placed ' + e.name); return entInfo(e); } },
   { name: 'remove', description: 'Remove a character or prop from the stage.',
     input_schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
@@ -1060,6 +1103,14 @@ export const TOOLS = [
       if (!m) throw new Error('No stored look called "' + i.look + '". Stored looks: ' + (all.map(x => x.name).join(', ') || 'none'));
       const miss = await preloadModels([m.hash]); if (miss.length) throw new Error(m.name + ' is in the studio but could not be fetched.');
       mutate(); swapLook(e, m.hash, m.name); act(e.name + ' now wears ' + m.name); return { character: e.name, look: m.name }; } },
+  { name: 'hold', description: 'Put a prop in a character\'s hand: it then follows that hand through every pose and the fingers close around it. hand is "left" or "right". First bring the hand where it should be with reach. look_at_it true also turns the palm toward the character\'s own face at the frame, as when reading a phone or a page. release true lets go: the prop goes back to where it stood.',
+    input_schema: { type: 'object', required: ['prop'], properties: { prop: { type: 'string' }, character: { type: 'string' }, hand: { type: 'string', enum: ['left', 'right'] }, look_at_it: { type: 'boolean' }, frame: { type: 'integer' }, release: { type: 'boolean' } } },
+    execute(i) { const e = needEnt(i.prop); if (e.kind !== 'prop' || isLight(e)) throw new Error(e.name + ' is not a prop.');
+      if (i.release) { mutate(); setHold(e, null); refreshStageUI(); act(e.name + ' released'); return entInfo(e); }
+      const c = needEnt(i.character); if (c.kind !== 'mannequin') throw new Error(c.name + ' is not a character.');
+      const S = i.hand === 'left' ? 'L' : 'R', f = clamp(Math.round(isFinite(i.frame) ? +i.frame : frame), 0, anim.length); mutate(); setHold(e, c, S);
+      if (i.look_at_it) aimPalm(c, S, c.byName.get('head').obj.getWorldPosition(new V3()).toArray(), f);
+      evaluate(frame); refreshStageUI(); act(c.name + ' holds ' + e.name); return entInfo(e); } },
   { name: 'set_hands', description: 'Pose the fingers of a character that wears a look: left and right each "relaxed" (default), "open" (flat), "grip" (holding something), "fist" or "point". Hands are a setting on the character, not keyframes.',
     input_schema: { type: 'object', required: ['character'], properties: { character: { type: 'string' }, left: { type: 'string', enum: HAND_POSES }, right: { type: 'string', enum: HAND_POSES } } },
     execute(i) { const e = needEnt(i.character); if (e.kind !== 'mannequin' || !e.params.look) throw new Error(e.name + ' does not wear a look, so it has no fingers to pose.');
@@ -1107,6 +1158,7 @@ Cheat sheet (degrees):
 - Standing naturally: upperArm_L [0,0,-78], upperArm_R [0,0,78], elbows bent about 10.
 - Sitting on a 0.45 m seat: hips pos [0,-0.40,0], thighs x -88, shins x +84.
 LOOKS: a character can wear a look, a real human model. Its controls do not change: you still pose the mannequin bones above, with the same names and the same cheat sheet, and the model follows them. A character wearing a look has the model's proportions, so its arm, leg and seat heights differ a little from the numbers above; use get_rig and get_joint_positions when exact heights matter. Use list_looks and set_look to change what a character wears.
+HOLDING THINGS: when a character should hold something (a phone, a cup, a page), never leave it floating near the hands. Use reach to bring the hand to where it is held, then hold to put the prop in that hand (with look_at_it when they read it). The prop then follows the hand.
 LIGHTING AND MATERIALS, for photoreal renders (the viewport is a preview; the render server draws the real thing): light a scene like a film set. Pick an environment with set_lighting, then add lights with add_light: a key light (large area light to one side of the camera, above head height, aimed at the main character's head), a weaker fill from the other side, and a rim light behind and above to separate people from the background. For interiors turn the sun off (sun_power 0), use the "interior" or "studio" environment at ambient 0.3 to 0.6, and put warm area lights where real lamps would be. Give props a material preset (wood, leather, fabric, velvet, stone, brick, plaster, metal, paper, glass, plastic, ceramic, glow, neon) with add_prop or place: the renderer adds grain, pores, bumps and rounded edges; "glow" makes a prop shine like a lampshade and "neon" like a neon tube: put them in the background of a shot for depth. Use set_hands so held objects are gripped and resting hands are relaxed.
 MOTIONS: the user can import recorded movement (motion capture: walks, idles, dances). list_motions shows them and apply_motion keys one onto any character, retargeted to that body. Prefer a recorded motion over hand keys when one fits the request, then refine with set_keyframes: for example apply a walk with parts "lower" and pose the arms yourself, or layer an idle over a seated pose. Recorded motions are keyed every frame or two, so edit them by changing whole spans rather than single frames.
 Imported models that are not characters have their own bone names: call get_rig and work from each bone's rest direction.

@@ -124,6 +124,51 @@ def setup_camera(scene, job):
     return cams
 
 
+def setup_speaker_light(scene, job, cams):
+    """Whoever is speaking gets a light from behind and above, so their outline glows against the room.
+    The light sits on the far side of the speaker from the camera, wherever the camera is in that shot."""
+    sp = job.get('speaker_light') or {}
+    cues = sp.get('speakers') or []
+    if not cues:
+        return
+    data = bpy.data.lights.new('Speaker rim', 'SPOT')
+    data.spot_size = math.radians(float(sp.get('spread', 30)))
+    data.spot_blend = 0.6
+    data.shadow_soft_size = 0.06
+    data.color = surfaces.hex_to_linear(sp.get('color', '#fff0dc'))[:3]
+    ob = bpy.data.objects.new('Speaker rim', data)
+    ob.visible_camera = False
+    scene.collection.objects.link(ob)
+    power = float(sp.get('power', 260))
+    offset = int(job.get('frame_offset', 0))
+    frames = sorted(cams)
+
+    def place(sc, *_):
+        f = sc.frame_current - offset
+        best, w = None, 0.0
+        for c in cues:                                   # fades up as a line starts and down after it ends
+            fade = min((f - c['f0'] + 6) / 6.0, (c['f1'] + 10 - f) / 10.0)
+            if fade > w:
+                best, w = c, fade
+        data.energy = power * max(0.0, min(1.0, w))
+        if not best:
+            return
+        cam = cams.get(f) or cams[min(frames, key=lambda x: abs(x - f))]
+        head, eye = to_blender(best['head']), to_blender(cam['p'])
+        away = head - eye
+        away.z = 0
+        if away.length < 1e-4:
+            away.y = 1.0
+        away.normalize()
+        side = away.cross(surfaces.Vector((0, 0, 1)))
+        pos = head + away * 1.0 + side * 0.45 + surfaces.Vector((0, 0, 0.85))
+        ob.location = pos
+        ob.rotation_euler = (head - pos).to_track_quat('-Z', 'Y').to_euler()
+
+    bpy.app.handlers.frame_change_pre.append(place)
+    place(scene)
+
+
 def setup_render(scene, job):
     r = scene.render
     r.engine = 'CYCLES'
@@ -166,7 +211,8 @@ def main():
         job = json.load(fh)
     os.makedirs(out_dir, exist_ok=True)
     scene = setup_scene(job, job_dir)
-    setup_camera(scene, job)
+    cams = setup_camera(scene, job)
+    setup_speaker_light(scene, job, cams)
     setup_render(scene, job)
 
     f0, f1 = job['frames']

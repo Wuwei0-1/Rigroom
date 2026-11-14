@@ -42,8 +42,14 @@ export function b64(buf) {
 const enc = p => p.split('/').map(encodeURIComponent).join('/');
 /** A file from the studio as text, or null if it does not exist. */
 export const readText = path => gh(`/repos/${conf.studio}/contents/${enc(path)}?ref=main`, { raw: true, allow404: true });
-/** A file from the studio as bytes (files up to 100 MB), or null. */
-export const readBytes = path => gh(`/repos/${conf.studio}/contents/${enc(path)}?ref=main`, { raw: 'bytes', allow404: true });
+/** A file from the studio as bytes, or null. Files kept in Git LFS (large videos) are fetched from GitHub's media host. */
+export async function readBytes(path) {
+  const buf = await gh(`/repos/${conf.studio}/contents/${enc(path)}?ref=main`, { raw: 'bytes', allow404: true });
+  if (!buf || buf.byteLength > 400 || !new TextDecoder().decode(buf).startsWith('version https://git-lfs')) return buf;
+  const res = await fetch(`https://media.githubusercontent.com/media/${conf.studio}/main/${enc(path)}`, { cache: 'no-store', headers: { Authorization: 'Bearer ' + conf.token } });
+  if (!res.ok) { const err = new Error('HTTP ' + res.status); err.status = res.status; throw err; }
+  return res.arrayBuffer();
+}
 
 /**
  * Can this token see the studio, and can it write there? A private repository the token cannot

@@ -51,6 +51,7 @@ The viewport is a preview. The render server draws the real thing, and these are
 - **Environment** (Project → Look): the surroundings that light the scene from every side: a photographed studio, interior, courtyard, city, forest, sunrise, sunset or night (1K HDR images in `assets/env`, CC0 from Poly Haven), or the soft grey default. **Turn** rotates it; **Ambient** is its strength.
 - **Floor:** matte, wood boards, concrete, tiles or carpet. **Haze** puts smoke or dust in the air, so light beams show and the distance softens.
 - **People.** Skin scatters light under its surface. Imports pick up a scan's normal and gloss maps by file name (`…_norm.jpg`, `…_gloss.jpg` next to `…_dif.jpg`).
+- **Holding things.** Select a prop and set **Held by** to a character's hand (or ask the agent: `hold`). The prop sits in the palm, the fingers close around it, and it follows the hand through every pose.
 - **Hands and faces.** Stage → Look → Hands sets each hand of a real person: relaxed, open, grip, fist or point. Every character also has a **jaw** and **lids** control on the rig (rotate about x: about 3 to 8° for speech, 26° for a blink) that drive a real person's jaw and eyelids.
 - **Lens.** A camera key can carry an f-stop (through the agent's `set_camera`), which blurs what is nearer or farther than the target. Renders get a little bloom, grain and corner darkening; shots get motion blur.
 
@@ -63,7 +64,7 @@ The agent has all of this: `add_light`, `place` (material, light settings), `set
 1. `python3 film/script_to_lines.py SCRIPT.txt film/<id>/script.json` reads a play laid out as numbered `N. SPEAKER: line` entries with stage directions.
 2. The **Voices** workflow (inputs `film=<id>`, optional `lines=1-9`) speaks every line with [Chatterbox](https://github.com/resemble-ai/chatterbox) and writes `film/<id>/audio/NNN.mp3` and `audio.json` (lengths and loudness curves). Each character's voice comes from a reference clip, `film/<id>/voices/<Character>.wav`: record 8 to 20 seconds yourself, or let the workflow design one (the built-in voice shifted to the pitch set in `voices.json`, belonging to no real person). A speech recogniser listens to every take and bad takes are redone.
 3. `film/director.js` runs inside the app on a posed scene and keys it from the audio: jaws from loudness, blinks, who looks at whom, breathing, hand gestures, and one camera per shot with cuts on the lines.
-4. The scene goes to the render server as a job with `audio` (which lines start when); the result is an MP4 with the voices mixed in.
+4. The scene goes to the render server as a job with `audio` (which lines start when) and `speaker_light` (who speaks when): the result is an MP4 with the voices mixed in, and whoever is speaking is lit from behind so their outline glows.
 
 ## Studio
 

@@ -3,7 +3,7 @@
 //   data = { lines: [{ n, speaker, seconds, env }], cast: { Name: { jaw, hand, handBase } }, cams: { name: { p, t, fov, fstop } },
 //            shotFor: { Speaker: camName }, cutaways: { Speaker: [camName, ...] }, addressee: { Speaker: [names] }, lead, gap, tail, fps }
 // It keys: jaws from each line's loudness, blinks, who looks at whom, breathing, small hand gestures, and one camera per shot.
-// It returns { length, cues: [{ n, t }], shots: [{ f, cam }] } and leaves the keys on the scene.
+// It returns { length, cues: [{ n, t }], shots: [{ f, cam }], speakers: [{ n, f0, f1, head }] } and leaves the keys on the scene.
 const fps = data.fps || 24, F = s => Math.round(s * fps);
 let seedN = 20261113; const rnd = () => (seedN = (seedN * 1664525 + 1013904223) >>> 0) / 4294967296;
 const names = Object.keys(data.cast);
@@ -79,4 +79,7 @@ for (const [i, s] of shots.entries()) { const end = (shots[i + 1] ? shots[i + 1]
   if (end > s.f) A.ctx.camKeys.push({ f: end, p: p1, t: c.t.slice(), fov: c.fov, fstop: c.fstop }); }
 A.applyFrame(0);
 log.push({ length, seconds: +(length / fps).toFixed(1), shots: shots.length, cues: cues.map(c => [c.n, c.t]) });
-window.__film = { length, cues: cues.map(c => ({ n: c.n, t: c.t })), shots };
+// who is speaking when, and where their head is: the renderer lights the speaker's outline from behind
+const speakers = cues.map(c => ({ n: c.n, f0: c.f0, f1: c.f1, head: headOf2(c.speaker, Math.min(length, c.f0 + 12)).map(v => +v.toFixed(3)) }));
+A.applyFrame(0);
+window.__film = { length, cues: cues.map(c => ({ n: c.n, t: c.t })), shots, speakers };
