@@ -430,8 +430,30 @@ def edward(scene, job, people, props, floor):
             for j, m in enumerate(ob.data.materials):
                 img = scan_texture(m)
                 ob.data.materials[j] = hatched('Edward ' + ob.name + str(j), img) if img else page
+    def drawn_screen(ob, m):
+        """A screen's picture drawn on the page: its bright parts in charcoal, its dark parts left as page (a negative, the way a sketch shows a lit screen)."""
+        tex = next((n for n in m.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image), None) if m and m.node_tree else None
+        if not tex:
+            return page
+        mat = m.copy()
+        mat.name = 'Edward screen ' + ob.name
+        nt = mat.node_tree
+        tex = next(n for n in nt.nodes if n.type == 'TEX_IMAGE' and n.image)
+        bw = nt.nodes.new('ShaderNodeRGBToBW')
+        nt.links.new(tex.outputs['Color'], bw.inputs[0])
+        ramp = nt.nodes.new('ShaderNodeValToRGB')
+        ramp.color_ramp.interpolation = 'EASE'
+        ramp.color_ramp.elements[0].position, ramp.color_ramp.elements[0].color = 0.08, PAGE
+        ramp.color_ramp.elements[1].position, ramp.color_ramp.elements[1].color = 0.6, CHARCOAL
+        nt.links.new(bw.outputs[0], ramp.inputs['Fac'])
+        e = nt.nodes.new('ShaderNodeEmission')
+        nt.links.new(ramp.outputs['Color'], e.inputs['Color'])
+        outn = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
+        nt.links.new(e.outputs[0], outn.inputs['Surface'])
+        return mat
+
     for ob, kind, m in props:
-        setmat(ob, page)
+        setmat(ob, drawn_screen(ob, m) if kind == 'screen' else page)
     if floor:
         setmat(floor, page)
     fs = lines_on(scene)
