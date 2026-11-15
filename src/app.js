@@ -479,6 +479,8 @@ function evalTrack(b, tr, f) {
     if (a.p && c.p) b.obj.position.set(a.p[0] + (c.p[0] - a.p[0]) * u, a.p[1] + (c.p[1] - a.p[1]) * u, a.p[2] + (c.p[2] - a.p[2]) * u);
     return;
   }
+  // two identical keys in a row are a hold: the pose stays put between them (a spline would bulge toward the keys around them)
+  if (Math.abs(dot4(a.q, c.q)) > 0.999999 && ((!a.p && !c.p) || (a.p && c.p && Math.abs(a.p[0] - c.p[0]) < 1e-4 && Math.abs(a.p[1] - c.p[1]) < 1e-4 && Math.abs(a.p[2] - c.p[2]) < 1e-4))) return poseKey(b, a);
   // Hermite spline through the keys; a loop whose first and last keys match wraps its tangents
   const cyc = anim.loop && n > 2 && tr[0].f === 0 && tr[n - 1].f === anim.length && Math.abs(dot4(tr[0].q, tr[n - 1].q)) > 0.9995;
   let pv = null, pf = 0, nx = null, nf = 0;
