@@ -85,6 +85,7 @@ A render job can also render a Blender file kept in the studio, exactly as it wa
 3. `film/director.js` runs inside the app on a posed scene and keys it from the audio: jaws from loudness, blinks, who looks at whom, breathing, hand gestures, and one camera per shot with cuts on the lines.
 4. The scene goes to the render server as a job with `audio` (which lines start when) and `speaker_light` (who speaks when): the result is an MP4 with the voices mixed in, and whoever is speaking is lit from behind so their outline glows.
 5. `python3 film/assemble.py FILM.mp4 [--size 1280x720] [--fps 24] PART...` joins the rendered parts into one film. A part is a video, `card:Title|Subtitle` (a 5-second title card) or `end:Text` (a 4-second end card); every part is fitted to one size and frame rate, and silent parts get a silent track, so chapters made in different styles or sizes join cleanly.
+6. `python3 film/splice.py PART.mp4 OUT.mp4 PATCH.mp4@FRAME ...` swaps a re-rendered stretch into a finished part, frame for frame, keeping its sound: render the same job again with `frames` set to the stretch (and `fade` 0), then splice the result in at its first frame.
 
 ## Studio
 
