@@ -269,3 +269,71 @@ def key_value(mat, name, frame, v):
     n = mat.node_tree.nodes[name]
     n.outputs[0].default_value = v
     n.outputs[0].keyframe_insert('default_value', frame=frame)
+
+
+def slides_material(name, paths, power=1.1):
+    """A wall-screen material that shows one picture after another: value nodes Slide1..SlideN-1 each mix in the next
+    picture (key them 0 -> 1 to change it), Dawn mixes in a warm sunrise, Power sets the brightness. A faint
+    scan line drifts down the picture."""
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in [n for n in nt.nodes if n.type != 'OUTPUT_MATERIAL']:
+        nt.nodes.remove(n)
+    out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
+    L = nt.links.new
+
+    def value(nm, v):
+        n = nt.nodes.new('ShaderNodeValue')
+        n.name = n.label = nm
+        n.outputs[0].default_value = v
+        return n
+
+    def mix(a, b, fac):
+        n = nt.nodes.new('ShaderNodeMix')
+        n.data_type = 'RGBA'
+        L(fac, n.inputs['Factor'])
+        L(a, n.inputs['A'])
+        L(b, n.inputs['B'])
+        return n.outputs['Result']
+
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    col = None
+    for k, p in enumerate(paths):
+        tex = nt.nodes.new('ShaderNodeTexImage')
+        tex.image = bpy.data.images.load(p)
+        tex.image.pack()
+        tex.extension = 'CLIP'
+        tex.interpolation = 'Cubic'
+        L(tc.outputs['UV'], tex.inputs['Vector'])
+        col = tex.outputs['Color'] if col is None else mix(col, tex.outputs['Color'], value('Slide%d' % k, 0.0).outputs[0])
+    # dawn: a warm horizon under a pale sky
+    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    L(tc.outputs['UV'], sep.inputs[0])
+    r3 = nt.nodes.new('ShaderNodeValToRGB')
+    r3.color_ramp.elements[0].position, r3.color_ramp.elements[0].color = 0.0, hexc('#ff8a3d')
+    r3.color_ramp.elements[1].position, r3.color_ramp.elements[1].color = 0.75, hexc('#9fc6e8')
+    L(sep.outputs['Y'], r3.inputs['Fac'])
+    col = mix(col, r3.outputs['Color'], value('Dawn', 0.0).outputs[0])
+    # a soft scan line
+    wave = nt.nodes.new('ShaderNodeTexWave')
+    wave.name = 'Scan'
+    wave.wave_type = 'BANDS'
+    wave.bands_direction = 'Y'
+    wave.inputs['Scale'].default_value = 1.2
+    wave.inputs['Distortion'].default_value = 0.0
+    L(tc.outputs['UV'], wave.inputs['Vector'])
+    ramp = nt.nodes.new('ShaderNodeMapRange')
+    ramp.inputs['From Min'].default_value, ramp.inputs['From Max'].default_value = 0.0, 1.0
+    ramp.inputs['To Min'].default_value, ramp.inputs['To Max'].default_value = 0.94, 1.06
+    L(wave.outputs['Fac'], ramp.inputs['Value'])
+    pw = value('Power', power)
+    mul = nt.nodes.new('ShaderNodeMath')
+    mul.operation = 'MULTIPLY'
+    L(ramp.outputs['Result'], mul.inputs[0])
+    L(pw.outputs[0], mul.inputs[1])
+    e = nt.nodes.new('ShaderNodeEmission')
+    L(col, e.inputs['Color'])
+    L(mul.outputs[0], e.inputs['Strength'])
+    L(e.outputs[0], out.inputs['Surface'])
+    return m

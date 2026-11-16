@@ -135,14 +135,25 @@ def face(B, arm, Hd, m, eye_yaw=17, eye_pitch=6, eye_r=0.034, pupil=0.46, brow=N
         from mathutils import Matrix
         B.add(lathe(prof, 18, Matrix.Translation(e) @ Matrix.Diagonal((eye_r * 1.13,) * 3 + (1,))), 'lid_' + side, lid_mat or skin)
         if brow:
-            a = Hd.at(s * (eye_yaw - 9), eye_pitch + 21 + brow_tilt, 1.02)
-            b = Hd.at(s * (eye_yaw + 10), eye_pitch + 21 - brow_tilt, 1.02)
-            B.add(capsule(a, b, brow[1], brow[1] * 0.8, seg=10, cap=4), 'head', brow[0])
+            # each brow on its own bone, so it can lift, knit and tilt
+            a = Hd.at(s * (eye_yaw - 9), eye_pitch + 21 + brow_tilt, 1.04)
+            b = Hd.at(s * (eye_yaw + 10), eye_pitch + 21 - brow_tilt, 1.04)
+            add_bone(arm, 'brow_' + side, (a + b) / 2)
+            B.add(capsule(a, b, brow[1], brow[1] * 0.8, seg=10, cap=4), 'brow_' + side, brow[0])
         if ears:
             B.add(sphere(Hd.at(s * 92, 0, 0.99), (0.02, 0.034, 0.045)), 'head', skin)
+    # the mouth: a centre bone opens it; a bone at each corner lifts (smile), drops (frown) or draws it in
     mc = Hd.at(0, mouth_pitch, mouth_out)
     add_bone(arm, 'mouth', mc)
-    B.add(sphere(mc, (mouth_w, 0.009, 0.012), seg=18, rings=8), 'mouth', m['mouth'])
+    for side, s in (('l', 1), ('r', -1)):
+        add_bone(arm, 'mouth_' + side, mc + V((s * mouth_w, 0, 0)))
+
+    def mw(co):
+        t = (co.x - mc.x) / mouth_w
+        sm = lambda x: 0.0 if x <= 0.15 else (1.0 if x >= 1 else ((x - 0.15) / 0.85) ** 2 * (3 - 2 * (x - 0.15) / 0.85))
+        wl, wr = sm(t), sm(-t)
+        return {'mouth': max(0.0, 1 - wl - wr), 'mouth_l': wl, 'mouth_r': wr}
+    B.add(sphere(mc, (mouth_w, 0.009, 0.012), seg=24, rings=8), None, m['mouth'], weights=mw)
     return mc
 
 
@@ -232,7 +243,7 @@ def aria(arm):
     cx, cy = j['hip'].x, j['hip'].y
     torso(B, j, top, 0.185, 0.19, 0.18, depth=0.84, mat_low=skirt)
     for side in 'lr':
-        limb(B, j, side, m, th=1.06, sleeve=top, legs=skirt, shin=skirt, shoe=shoe, hand_kind='hold', foot=0.9)
+        limb(B, j, side, m, th=1.06, sleeve=top, legs=skirt, shin=skirt, shoe=shoe, hand_kind='open', foot=0.9)
     sp3 = j['spine_03']
     B.add(sphere((cx, cy - 0.105, sp3.z + 0.09), (0.06, 0.03, 0.05)), 'spine_03', blouse)      # blouse at the neckline
     B.add(capsule(j['neck'], j['head'] + V((0, 0, 0.02)), 0.052, 0.05), 'neck', m['skin'])
@@ -264,7 +275,7 @@ def cleon(arm):
     cx, cy = j['hip'].x, j['hip'].y
     torso(B, j, hoodie, 0.16, 0.165, 0.185, depth=0.8, mat_low=jeans)
     for side in 'lr':
-        limb(B, j, side, m, th=0.98, sleeve=hoodie, legs=jeans, shoe=shoe, hand_kind='hold', foot=1.05)
+        limb(B, j, side, m, th=0.98, sleeve=hoodie, legs=jeans, shoe=shoe, hand_kind='open', foot=1.05)
     sp3 = j['spine_03']
     B.add(sphere((cx, cy - 0.11, sp3.z + 0.085), (0.055, 0.03, 0.05)), 'spine_03', tee)
     B.add(sphere((cx, cy + 0.1, sp3.z + 0.1), (0.14, 0.085, 0.09)), 'spine_03', hoodie)       # the hood, down

@@ -4,16 +4,30 @@
 
 JOB_DIR holds scene.blend and job.json. The file keeps its own engine, sets, lights and animation;
 the job may only set the frame size ("width", or "scale" as a fraction of the file's own size),
-the quality ("samples"), and "step" (render every Nth frame and hold it). Scripts inside the file
-never run. Frames are written as OUT_DIR/frame_NNNN.png.
+the quality ("samples"), "step" (render every Nth frame and hold it) and "skip" (a list of [first, last]
+frame ranges another picture will cover in the edit, such as a cut-away graphic: those are not rendered, the last
+rendered frame, or black, stands in). Scripts inside the file never run. Frames are written as OUT_DIR/frame_NNNN.png.
 """
 import json
 import os
 import shutil
+import struct
 import sys
 import time
+import zlib
 
 import bpy
+
+
+def black_png(path, w, h):
+    """A black RGB PNG, written without any imaging library."""
+    def chunk(kind, data):
+        c = kind + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+    raw = b''.join(b'\x00' + b'\x00' * (w * 3) for _ in range(h))
+    with open(path, 'wb') as fh:
+        fh.write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b''))
+    return path
 
 
 def main():
@@ -48,8 +62,14 @@ def main():
     step = max(1, int(job.get('step', 1)))
     f0 = int(job['frames'][0])
     held = None
+    skip = [(int(a), int(b)) for a, b in job.get('skip', [])]
     for f in range(first, last + 1):
         path = os.path.join(out_dir, 'frame_%04d.png' % f)
+        if any(a <= f <= b for a, b in skip):
+            if held is None:
+                held = black_png(os.path.join(job_dir, 'black.png'), r.resolution_x, r.resolution_y)
+            shutil.copyfile(held, path)
+            continue
         if (f - f0) % step and held:
             shutil.copyfile(held, path)
             continue

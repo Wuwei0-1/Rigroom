@@ -167,6 +167,18 @@ def build(news=None):
                        (frustum((0.02, 0.26, TABLE), (0.02, 0.26, TABLE + 0.07), 0.05, 0.065, seg=20), pot), (sphere((0.02, 0.26, TABLE + 0.12), (0.07, 0.07, 0.06)), leaf)])
 
 
+def boxes():
+    """The furniture people sit on, lean on and reach over, as (name, low corner, high corner) boxes."""
+    def b(name, c, s):
+        return (name, tuple(c[k] - s[k] / 2 for k in range(3)), tuple(c[k] + s[k] / 2 for k in range(3)))
+    sw = 0.62
+    return [b('seat back row', (0, 0.82, SEAT - 0.1), (3.9, sw, 0.2)), b('seat left', (-1.64, 0.02, SEAT - 0.1), (sw, 1.3, 0.2)),
+            b('seat right', (1.64, 0.02, SEAT - 0.1), (sw, 1.3, 0.2)),
+            b('back', (0, 1.2, 0.5), (4.3, 0.2, 0.8)), b('back left', (-2.03, 0.12, 0.56), (0.2, 1.7, 0.95)), b('back right', (2.03, 0.12, 0.56), (0.2, 1.7, 0.95)),
+            b('base back row', (0, 0.86, 0.1), (3.9, 0.56, 0.2)), b('base left', (-1.66, 0.02, 0.1), (0.56, 1.26, 0.2)), b('base right', (1.66, 0.02, 0.1), (0.56, 1.26, 0.2)),
+            b('table', (0, 0, TABLE - 0.025), (1.7, 0.8, 0.05))]
+
+
 def slate(name, glow_strength=3.0):
     """A hand-held glowing slate, lying flat at the origin with its screen up; returns the object."""
     body = material('Slate body', '#1a1d24', rough=0.4)
