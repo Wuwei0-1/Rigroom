@@ -15,6 +15,39 @@ def reset():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
+def strip_names(arm):
+    import re
+    for b in arm.data.bones:
+        b.name = re.sub(r'^rp_[a-z]+_animated_\d+_[a-z]+_', '', b.name)
+
+
+def read_motion(fbx, cache=None, first=1):
+    """Only the motion of an animated person: {'fps', 'n', 'rot': {bone: [q]}, 'loc': {'hip', 'root'}} with locations in metres."""
+    if cache and os.path.exists(cache):
+        return pickle.load(open(cache, 'rb'))
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.fbx(filepath=fbx)
+    new = [o for o in bpy.data.objects if o not in before]
+    arm = next(o for o in new if o.type == 'ARMATURE')
+    unit = arm.matrix_world.to_scale().x
+    strip_names(arm)
+    sc = bpy.context.scene
+    act = arm.animation_data.action
+    f0, f1 = int(act.frame_range[0]) + first, int(act.frame_range[1])
+    m = {'fps': 30, 'n': f1 - f0 + 1, 'rot': {pb.name: [] for pb in arm.pose.bones}, 'loc': {'hip': [], 'root': []}}
+    for f in range(f0, f1 + 1):
+        sc.frame_set(f)
+        for pb in arm.pose.bones:
+            m['rot'][pb.name].append(tuple(pb.rotation_quaternion))
+        for b in ('hip', 'root'):
+            m['loc'][b].append(tuple(arm.pose.bones[b].location * unit))
+    for o in new:
+        bpy.data.objects.remove(o, do_unlink=True)
+    if cache:
+        pickle.dump(m, open(cache, 'wb'))
+    return m
+
+
 def load_rig(fbx, cache=None):
     """Import the animated person, keep only the skeleton (bones renamed hip, spine_01, ...) and return it with its sampled motion.
 
@@ -29,9 +62,7 @@ def load_rig(fbx, cache=None):
     unit = mw.to_scale().x                      # the file is in centimetres and Y-up under a control object
     arm.parent = None
     arm.matrix_world = mw
-    for b in arm.data.bones:
-        if PREFIX_END in b.name:
-            b.name = b.name.split(PREFIX_END, 1)[1]
+    strip_names(arm)
     motion = None
     if cache and os.path.exists(cache):
         motion = pickle.load(open(cache, 'rb'))
