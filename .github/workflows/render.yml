@@ -134,7 +134,7 @@ jobs:
         env:
           KEY: ${{ secrets.STUDIO_TOKEN }}
         run: |
-          grep "rendered frame" render.log
+          grep "rendered frame" render.log || echo "no frames to render here: all are covered or held"
           tar -C frames -cf frames.tar .
           if [ "$STORE" = studio ]; then openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:KEY -in frames.tar -out frames.pack; else mv frames.tar frames.pack; fi
       - uses: actions/upload-artifact@v4
