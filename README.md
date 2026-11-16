@@ -57,6 +57,18 @@ The viewport is a preview. The render server draws the real thing, and these are
 
 The agent has all of this: `add_light`, `place` (material, light settings), `set_lighting` (environment, floor, haze), `set_hands`, and `set_camera` with `fstop`.
 
+## 3D printing
+
+Project → **3D print** saves a character, a prop, a model or everything on stage as an `.stl` file, in the pose on the frame showing. Open it in a slicer (Cura, PrusaSlicer, Bambu Studio, OrcaSlicer) to print it.
+
+- **Size** is the longest side in millimetres. The file is already in millimetres with z up, standing on the bed, so it needs no scaling or turning.
+- **Base** stands the figure on a round base wide enough to keep it upright; the figure sinks slightly into it so the two print as one piece.
+- A prop a character holds is printed with them. Lights are left out.
+- Real people (looks) are printed as posed, with the mannequin hidden.
+- The note under the button says whether every surface is closed. Built-in mannequins and props always are. Scanned people can have open edges (hair, lashes, loose clothing): the slicer repairs those, but check its preview before printing.
+- Thin parts (fingers, a mannequin's forearms) get very thin at small sizes; print a figure at 100 mm or more, and let the slicer add supports under raised arms.
+- The agent has the same: `export_print` (name or "all", `size_mm`, `base`, `frame`).
+
 ## Styles
 
 The same scene can be rendered in different looks: Project → Render server → **Style**.
@@ -118,7 +130,7 @@ Pushing changes to `render/` or the workflow re-renders a small mannequin-only s
 - **Shot camera:** camera keyframes, Shot view with a locked frame, a reference image overlay for posing against a drawing.
 - **Look:** image-based lighting, a sun you can aim, exposure, filmic tone mapping, soft shadows.
 - **Photoreal render:** path-traces the current frame (real light bounces) and saves a PNG.
-- **Output:** project `.json`, a `.glb` of the whole scene with baked animation (opens in Blender), and video of the viewport.
+- **Output:** project `.json`, a `.glb` of the whole scene with baked animation (opens in Blender), video of the viewport, and an `.stl` of a pose for 3D printing.
 
 ## Layout
 
@@ -133,6 +145,7 @@ src/server.js     render server: sends jobs to GitHub Actions and fetches result
 src/github.js     GitHub access: the token, the studio, commits
 src/studio.js     studio sync: saving and opening scenes and their models
 src/models.js     human models: loading, fitting, skeleton matching, browser storage
+src/print.js      3D printing: the posed scene as an STL in millimetres
 render/           Blender render script, surfaces and lights, and frame planner run by the workflow
 film/             script parser, voices (Chatterbox) and the film director
 assets/env/       environment light images (CC0)

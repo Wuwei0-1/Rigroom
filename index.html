@@ -9,8 +9,8 @@
 <title>Rigroom Animator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./src/ui.css?v=2026.11.14-2123">
-<script>window.RIGROOM_VERSION = "2026.11.14-2123";</script>
+<link rel="stylesheet" href="./src/ui.css?v=2026.11.16-0539">
+<script>window.RIGROOM_VERSION = "2026.11.16-0539";</script>
 <script type="importmap">
 {
   "imports": {
@@ -19,14 +19,15 @@
     "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/",
     "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.18/build/index.module.js",
     "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js",
-    "./src/app.js": "./src/app.js?v=2026.11.14-2123",
-    "./src/agent.js": "./src/agent.js?v=2026.11.14-2123",
-    "./src/trace.js": "./src/trace.js?v=2026.11.14-2123",
-    "./src/server.js": "./src/server.js?v=2026.11.14-2123",
-    "./src/models.js": "./src/models.js?v=2026.11.14-2123",
-    "./src/github.js": "./src/github.js?v=2026.11.14-2123",
-    "./src/studio.js": "./src/studio.js?v=2026.11.14-2123",
-    "./src/motion.js": "./src/motion.js?v=2026.11.14-2123"
+    "./src/app.js": "./src/app.js?v=2026.11.16-0539",
+    "./src/agent.js": "./src/agent.js?v=2026.11.16-0539",
+    "./src/trace.js": "./src/trace.js?v=2026.11.16-0539",
+    "./src/server.js": "./src/server.js?v=2026.11.16-0539",
+    "./src/models.js": "./src/models.js?v=2026.11.16-0539",
+    "./src/github.js": "./src/github.js?v=2026.11.16-0539",
+    "./src/studio.js": "./src/studio.js?v=2026.11.16-0539",
+    "./src/motion.js": "./src/motion.js?v=2026.11.16-0539",
+    "./src/print.js": "./src/print.js?v=2026.11.16-0539"
   }
 }
 </script>
@@ -268,6 +269,15 @@
           <p class="note" id="refNote">Shown over the scene in Shot view, so you can pose against a drawing.</p>
           <input type="file" id="fileRef" accept="image/*" hidden>
         </div>
+        <div class="group" id="printGroup">
+          <h3>3D print</h3>
+          <div class="row"><label for="printWhat">Print</label><select id="printWhat" style="flex:1;min-width:0"><option value="selected">Selected</option><option value="all">Everything on stage</option></select></div>
+          <div class="row"><label for="printSize">Size</label><input type="number" id="printSize" min="5" max="2000" step="5" value="120" style="width:86px"><span class="val" style="width:auto">mm</span><label for="printBase" style="min-width:0">Base</label><input type="checkbox" id="printBase" checked></div>
+          <div class="row">
+            <button class="btn primary" id="stlBtn">Save .stl</button>
+          </div>
+          <p class="note" id="printNote">Saves the pose on this frame as an STL file for a slicer (Cura, PrusaSlicer, Bambu Studio): in millimetres, upright on the print bed. Size is the longest side. Base stands a figure on a round base so it does not tip over.</p>
+        </div>
         <div class="group">
           <h3>Project</h3>
           <p class="note" id="versionNote"></p>
@@ -308,6 +318,6 @@
 <script>
 window.addEventListener('error',e=>{ const h=document.getElementById('hint'); if(h&&/import|module|three/i.test(String(e.message))) h.textContent='The 3D library did not load. Check the connection and reload.'; });
 </script>
-<script type="module" src="./src/main.js?v=2026.11.14-2123"></script>
+<script type="module" src="./src/main.js?v=2026.11.16-0539"></script>
 </body>
 </html>

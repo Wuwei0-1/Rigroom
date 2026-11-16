@@ -7,6 +7,7 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { initModels, importFiles, instantiate, mapSkeleton, fitModel, measureFit, cachedName, preloadModels, libraryModels } from './models.js';
 import { PARENT, PARTS, extractMotion, motionName, sampleBone, sampleHips, saveMotion, listMotions, getMotion, findMotion } from './motion.js';
+import { collectTriangles, buildPrint } from './print.js';
 
 export const SKETCH_URL = './assets/sketch.jpg', SKETCH_ASPECT = 1.6364;
 const $ = s => document.querySelector(s);
@@ -730,6 +731,7 @@ function refreshLookUI() {
     : 'Select a character to change how they look: tap them in the viewport or in the list above.';
 }
 export function refreshStageUI() {
+  refreshPrintUI();
   const list = $('#entList'); list.textContent = '';
   for (const e of ents) { const el = document.createElement('button'); el.className = 'item' + (e === active ? ' on' : '') + (Object.keys(e.tracks).length ? ' keyed' : '');
     const sm = document.createElement('small'); sm.textContent = e.kind === 'prop' ? (isLight(e) ? e.params.type + ' light' : e.params.shape) : (e.kind === 'import' ? 'model' : 'character');
@@ -964,6 +966,42 @@ export function exportGLB(opts) {
 export function cameraAt(f) { const k = camAt(f); return k ? { p: k.p.slice(), t: k.t.slice(), fov: k.fov, ...(k.fstop ? { fstop: k.fstop } : {}) } : { p: camera.position.toArray(), t: orbit.target.toArray(), fov: camera.fov }; }
 export function frameAspect() { return ref.url && shotView ? ref.aspect : (camKeys.length ? (ref.url ? ref.aspect : 16 / 9) : camera.aspect); }
 $('#glbBtn').onclick = async () => { try { const buf = await exportGLB(); saveFile('rigroom-scene.glb', new Blob([buf], { type: 'model/gltf-binary' })); } catch (e) { toast('Export failed: ' + (e && e.message || e), true); } };
+/* 3D print: the pose on a frame as an STL file in millimetres, upright on the print bed (src/print.js) */
+/** what: 'all' for everything on stage, or a character, prop or model (with whatever it holds); default the selected one.
+ *  size: its longest side in mm. base: stand it on a round base. frame: default the current frame. Returns the file and its measurements. */
+export function exportSTL(o = {}) {
+  const all = o.what === 'all', who = all ? null : (o.what && typeof o.what === 'object' ? o.what : active);
+  if (!all && (!who || isLight(who))) throw new Error('Select the character, prop or model to print first.');
+  const list = all ? ents.filter(e => !isLight(e)) : [who, ...ents.filter(p => holder(p) === who)];
+  pause(); const keep = frame, f = isFinite(o.frame) ? clamp(Math.round(+o.frame), 0, anim.length) : keep;
+  let out;
+  try { evaluate(f); stage.updateMatrixWorld(true); out = buildPrint(collectTriangles(list.map(e => e.group)), { size: o.size, base: !!o.base, name: all ? 'scene' : who.name }); }
+  finally { applyFrame(keep); }
+  const slug = (all ? 'scene' : who.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'model';
+  return { ...out, name: all ? 'Everything on stage' : who.name, file: 'rigroom-' + slug + '.stl', frame: f };
+}
+function printSummary(r) {
+  const mm = v => v >= 100 ? Math.round(v) : r1(v);
+  return r.name + ': ' + r.size.map(mm).join(' × ') + ' mm (wide × deep × tall)' + (r.base ? ', on a ' + mm(r.base) + ' mm base' : '') + ', ' + r.triangles.toLocaleString('en-US') + ' triangles. '
+    + (r.open == null ? 'Too detailed to check for holes here; the slicer will.' : r.open ? r.open.toLocaleString('en-US') + ' open edges: the surface has holes or loose sheets (hair, lashes, clothing edges), so let the slicer repair it, and check the preview before printing.' : 'Every surface is closed, so it is ready to slice.');
+}
+function refreshPrintUI() {
+  const pick = $('#printWhat'); if (!pick) return; const ok = !!active && !isLight(active);
+  pick.options[0].textContent = ok ? 'Selected: ' + active.name : 'Selected (nothing yet)'; pick.options[0].disabled = !ok;
+  // with nothing printable selected the picker shows the whole stage, and goes back to the selection once there is one
+  if (!ok) { if (pick.value !== 'all') { pick.value = 'all'; pick.dataset.auto = '1'; } } else if (pick.dataset.auto) { pick.value = 'selected'; delete pick.dataset.auto; }
+}
+$('#printWhat').onchange = e => { delete e.target.dataset.auto; };
+$('#stlBtn').onclick = () => {
+  const btn = $('#stlBtn'); btn.disabled = true; toast('Preparing the print…');
+  // let the message show before the work starts: a detailed scan takes a few seconds on a tablet
+  setTimeout(() => {
+    try { const r = exportSTL({ what: $('#printWhat').value === 'all' ? 'all' : null, size: +$('#printSize').value, base: $('#printBase').checked });
+      saveFile(r.file, new Blob([r.stl], { type: 'model/stl' })); $('#printNote').textContent = printSummary(r); }
+    catch (e) { toast('Could not make the print: ' + (e && e.message || e), true); }
+    btn.disabled = false;
+  }, 60);
+};
 $('#videoBtn').onclick = () => {
   if (recording || tracing) return;
   if (!(canvas.captureStream && window.MediaRecorder)) return toast('This browser cannot record video.', true);
@@ -1129,6 +1167,11 @@ export const TOOLS = [
       mutate(); const r = applyMotion(e, m, { start: i.frame, parts: i.parts, mode: i.mode, from: i.from, to: i.to, speed: i.speed, repeat: i.repeat, inPlace: i.in_place });
       evaluate(frame); act(m.name + ' on ' + e.name + ', frames ' + r.start + '-' + r.end);
       return { character: e.name, motion: m.name, frames: [r.start, r.end], keys: r.keys, note: r.extended ? 'Timeline extended to ' + r.end + ' frames.' : undefined }; } },
+  { name: 'export_print', description: 'Save a 3D-printable STL file of a character, prop or model (name), or of "all" (everything on stage), in the pose at a frame (default: the frame showing). It is sized in millimetres so its longest side is size_mm (default 120), upright on the print bed; base true stands it on a round base, which a standing figure needs. Returns its measurements and open_edges: 0 means every surface is closed; more means the slicer will have to repair holes. The file goes to the user\'s downloads.',
+    input_schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, size_mm: { type: 'number' }, base: { type: 'boolean' }, frame: { type: 'integer' } } },
+    execute(i) { const all = /^(all|everything|scene)$/i.test(String(i.name).trim()), r = exportSTL({ what: all ? 'all' : needEnt(i.name), size: i.size_mm, base: !!i.base, frame: i.frame });
+      saveFile(r.file, new Blob([r.stl], { type: 'model/stl' })); $('#printNote').textContent = printSummary(r); act('saved ' + r.file);
+      return { file: r.file, frame: r.frame, size_mm: r.size.map(r1), base_mm: r.base ? r1(r.base) : undefined, triangles: r.triangles, open_edges: r.open == null ? 'not checked' : r.open }; } },
   { name: 'playback', description: 'Control the viewport: "play", "pause", or "goto" a frame.',
     input_schema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['play', 'pause', 'goto'] }, frame: { type: 'integer' } } },
     execute(i) { if (i.action === 'play') wantPlay = true; else { wantPlay = false; pause(); if (i.action === 'goto') applyFrame(clamp(Math.round(+i.frame || 0), 0, anim.length)); } return { ok: true }; } },
@@ -1166,6 +1209,7 @@ HOLDING THINGS: when a character should hold something (a phone, a cup, a page),
 LIGHTING AND MATERIALS, for photoreal renders (the viewport is a preview; the render server draws the real thing): light a scene like a film set. Pick an environment with set_lighting, then add lights with add_light: a key light (large area light to one side of the camera, above head height, aimed at the main character's head), a weaker fill from the other side, and a rim light behind and above to separate people from the background. For interiors turn the sun off (sun_power 0), use the "interior" or "studio" environment at ambient 0.3 to 0.6, and put warm area lights where real lamps would be. Give props a material preset (wood, leather, fabric, velvet, stone, brick, plaster, metal, paper, glass, plastic, ceramic, glow, neon) with add_prop or place: the renderer adds grain, pores, bumps and rounded edges; "glow" makes a prop shine like a lampshade and "neon" like a neon tube: put them in the background of a shot for depth. Use set_hands so held objects are gripped and resting hands are relaxed.
 MOTIONS: the user can import recorded movement (motion capture: walks, idles, dances). list_motions shows them and apply_motion keys one onto any character, retargeted to that body. Prefer a recorded motion over hand keys when one fits the request, then refine with set_keyframes: for example apply a walk with parts "lower" and pose the arms yourself, or layer an idle over a seated pose. Recorded motions are keyed every frame or two, so edit them by changing whole spans rather than single frames.
 Imported models that are not characters have their own bone names: call get_rig and work from each bone's rest direction.
+3D PRINTING: export_print saves a character, prop or model (or "all") as an STL file for a slicer, in the pose at a frame. Pose it first, give a standing figure a base, and tell the user the measurements it returns. If open_edges is not 0, say the slicer will need to repair the surface.
 
 HOW TO WORK:
 - The app state in the user's message lists what is on stage. Call get_scene or get_animation when you need exact values.
