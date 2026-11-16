@@ -192,7 +192,7 @@ def socrates(arm):
     B.add(capsule(j['neck'], j['head'] + V((0, 0, 0.02)), 0.058, 0.055), 'neck', m['skin'])
     Hd = Head((cx, cy - 0.02, j['head'].z + 0.115), (0.152, 0.158, 0.152))
     B.add(sphere(Hd.C, Hd.R, seg=28, rings=18), 'head', m['skin'])
-    face(B, arm, Hd, m, eye_yaw=18, eye_pitch=5, eye_r=0.033, brow=(hair, 0.017), brow_tilt=6, mouth_w=0.04, mouth_pitch=-39, mouth_out=1.3)
+    face(B, arm, Hd, m, eye_yaw=18, eye_pitch=5, eye_r=0.033, brow=(hair, 0.017), brow_tilt=6, mouth_w=0.036, mouth_pitch=-38, mouth_out=1.035)
     B.add(sphere(Hd.at(0, -9, 1.1), (0.04, 0.045, 0.036)), 'head', m['skin'])     # a round nose
     rng = random.Random(7)
 
@@ -209,13 +209,13 @@ def socrates(arm):
         if d.y < -0.8 and d.z > -0.42:      # leave the mouth
             return None
         p = Hd.along(d, 1.04) + V((0, -0.012, -0.03 if d.z < -0.5 else 0))
-        return None if (p - Hd.at(0, -39, 1.3)).length < 0.075 else p
+        return None if (p - Hd.at(0, -38, 1.035)).length < 0.08 else p
     for c, r in curls(rng, 70, hair_at, (0.034, 0.05)):
         B.add(sphere(c, r, seg=10, rings=7), 'head', hair)
     for c, r in curls(rng, 60, beard_at, (0.03, 0.046)):
         B.add(sphere(c, r, seg=10, rings=7), 'head', hair)
     for x in (-1, 1):     # moustache
-        B.add(capsule(Hd.at(x * 4, -24, 1.14), Hd.at(x * 20, -31, 1.1), 0.022, 0.016, seg=10, cap=4), 'head', hair)
+        B.add(capsule(Hd.at(x * 4, -21, 1.1), Hd.at(x * 21, -27, 1.07), 0.02, 0.015, seg=10, cap=4), 'head', hair)
     return B.finish(arm), Hd
 
 
