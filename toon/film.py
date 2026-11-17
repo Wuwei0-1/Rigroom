@@ -522,7 +522,9 @@ def move_at(keys, time):
             if pa and pb:
                 out = {}
                 for b in pa:
-                    if b.startswith('_plant_'):
+                    if b.startswith('_follow_'):
+                        out[b] = pa[b]
+                    elif b.startswith('_plant_'):
                         (Ha, ea), (Hb, eb) = pa[b], pb[b]
                         H = Ha.to_quaternion().slerp(Hb.to_quaternion(), k).to_matrix().to_4x4()
                         H.translation = Ha.translation.lerp(Hb.translation, k)
@@ -543,7 +545,7 @@ FREE = {'Socrates': ['r', 'l'], 'Julian': ['l', 'r'], 'Cleon': ['l'] if SLATE_HE
 LAB = []          # every pose a gesture asks for, to check for clearances: (who, name, {bone: q})
 
 
-def capture2(ch, fn, name='', sides='lr', planted=False):
+def capture2(ch, fn, name='', sides='lr', planted=False, want=None, follow=None, elbow=None):
     """Like capture, for gestures that use both hands: {bone: q} for the arm bones of the given sides.
     planted: the hand is held at its spot in the room (over a slate on the table) however the body sways."""
     arm = ch['arm']
@@ -552,7 +554,12 @@ def capture2(ch, fn, name='', sides='lr', planted=False):
     g = {b: arm.pose.bones[b].rotation_quaternion.copy() for sd in sides for b in ARM_BONES(sd)}
     if planted:
         for sd in sides:
-            g['_plant_' + sd] = (arm.pose.bones['hand_' + sd].matrix.copy(), arm.pose.bones['lowerarm_' + sd].matrix.translation.copy())
+            H = arm.pose.bones['hand_' + sd].matrix.copy()
+            if want and sd in want:          # where the wrist should be, even if the arm could not get there upright
+                H.translation = want[sd]
+            g['_plant_' + sd] = (H, elbow[sd] if elbow and sd in elbow else arm.pose.bones['lowerarm_' + sd].matrix.translation.copy())
+            if follow is not None:
+                g['_follow_' + sd] = follow
     for b, (q, l, s_) in before.items():
         arm.pose.bones[b].rotation_quaternion = q
         arm.pose.bones[b].location = l
@@ -561,8 +568,8 @@ def capture2(ch, fn, name='', sides='lr', planted=False):
     return g
 
 
-def capture(ch, side, fn, name='', planted=False):
-    return capture2(ch, fn, name, side, planted)
+def capture(ch, side, fn, name='', planted=False, want=None, follow=None, elbow=None):
+    return capture2(ch, fn, name, side, planted, {side: want} if want is not None else None, follow, {side: elbow} if elbow is not None else None)
 
 
 def still(who, t0, t1, yaw, pitch, x=None):
@@ -694,7 +701,9 @@ def slate_top(ob, u=0.0, v=0.0, h=0.03):
     return ob.matrix_world @ V((0.11 * u, 0.07 * v, 0.0115 + h))
 
 
-def over_slate(who, side, ob, u, v, h, name):
+def over_slate(who, side, ob, u, v, h, name, pole=None, exact=False):
+    """exact: hold the hand at the very point even where the upright arm falls short (the gesture leans in to reach),
+    with the elbow keeping its place relative to the chest."""
     c = CH[who]; arm = c['arm']
     sg = 1 if side == 'l' else -1
     S = kit.joint(arm, 'upperarm_' + side)
@@ -702,10 +711,16 @@ def over_slate(who, side, ob, u, v, h, name):
     nrm = (arm.matrix_world.inverted().to_3x3() @ (ob.matrix_world.to_3x3() @ V((0, 0, 1)))).normalized()
     f = (p - S); f = (f - nrm * f.dot(nrm)).normalized()
     p = p - f * 0.06      # the palm a little short of the point, the fingers over it
-    return capture(c, side, lambda: place_hand(arm, side, p, f, -nrm, S + V((sg * 0.55, -0.1, -0.45))), name, planted=True)
+
+    def fn():
+        place_hand(arm, side, p, f, -nrm, S + V(pole or (sg * 0.55, -0.1, -0.45)))
+        if opt('--reach-report'):
+            miss = (kit.joint(arm, 'hand_' + side) - (p - f * PALM)).length
+            print('REACH %-7s %-10s miss %.3f m  shoulder-to-target %.3f m' % (who, name, miss, ((p - f * PALM) - S).length))
+    return capture(c, side, fn, name, planted=True, want=(p - f * PALM) if exact else None, follow=1.0 if exact else None)
 
 
-def hover(who, side, world, name):
+def hover(who, side, world, name, pole=None, exact=False):
     """A palm-down hand held at a point in the room, a step on the way over the table's edge."""
     c = CH[who]; arm = c['arm']
     sg = 1 if side == 'l' else -1
@@ -713,7 +728,8 @@ def hover(who, side, world, name):
     p = kit.to_arm(arm, world)
     f = p - S
     f = V((f.x, f.y, 0)).normalized()
-    return capture(c, side, lambda: place_hand(arm, side, p, f, V((0, 0, -1)), S + V((sg * 0.55, -0.1, -0.45))), name, planted=True)
+    return capture(c, side, lambda: place_hand(arm, side, p, f, V((0, 0, -1)), S + V(pole or (sg * 0.55, -0.1, -0.45))), name, planted=True,
+                   want=(p - f * PALM) if exact else None, follow=1.0 if exact else None)
 
 
 def lift_for(who, side, ob):
@@ -737,18 +753,22 @@ def swipe(t0):
 def tap_dance(t0, t1):
     """Aria's fingers dance across her slate: the hand hops from place to place, dipping toward the screen."""
     sl = CH['Aria']['slate']
-    L = hover('Aria', 'r', lift_for('Aria', 'r', sl), 'lift')
-    keys = [(t0 - 0.3, None), (t0 + 0.15, L)]
+    PO = (-0.95, -0.05, -0.2)          # elbow out to her right, clear of her side as she leans in
+    L = hover('Aria', 'r', lift_for('Aria', 'r', sl) + V((-0.07, -0.04, 0.06)), 'lift', pole=PO, exact=True)
+    Wp = hover('Aria', 'r', V((-0.02, 0.56, lounge.TABLE + 0.07)), 'up from lap', pole=PO, exact=True)     # behind the table's edge
+    keys = [(t0 - 0.5, None), (t0 - 0.1, Wp), (t0 + 0.15, L)]
     tt = t0 + 0.5
     k = 0
     while tt < t1 - 0.8:
         u, v = rng.uniform(-0.6, 0.6), rng.uniform(-0.5, 0.3)
-        keys.append((tt, over_slate('Aria', 'r', sl, u, v, 0.04, 'dance up')))
-        keys.append((tt + 0.25, over_slate('Aria', 'r', sl, u, v, 0.02, 'dance down')))
+        u, v = -0.85 + (u + 0.6) * 0.75, 0.1 + (v + 0.5) * 0.85      # the same draws, on the half of the slate nearest her right hand
+        keys.append((tt, over_slate('Aria', 'r', sl, u, v, 0.04, 'dance up', pole=PO, exact=True)))
+        keys.append((tt + 0.25, over_slate('Aria', 'r', sl, u, v, 0.02, 'dance down', pole=PO, exact=True)))
         tt += 0.55
         k += 1
-    keys += [(t1 - 0.4, L), (t1, None)]
+    keys += [(t1 - 0.4, L), (t1 - 0.15, Wp), (t1 + 0.25, None)]
     move('Aria', keys)
+    CH['Aria']['leans'].append((t0 - 0.3, t1 + 0.3, float(opt('--aria-lean', 26))))     # she leans in to work the slate
 
 
 def stroke_beard(t0, t1):
@@ -816,12 +836,22 @@ def raise_hand(t0, t1):
     move('Socrates', [(t0, None), (t0 + 0.9, P), (t1 - 0.8, P), (t1, None)])
 
 
-def reach_slate(t0):
-    """Julian reaches out and touches his slate on the table (his fingertips stop just above the screen)."""
-    L = hover('Julian', 'r', lift_for('Julian', 'r', JSLATE), 'lift')
-    A = over_slate('Julian', 'r', JSLATE, 0.0, -0.4, 0.05, 'reach A')
-    B = over_slate('Julian', 'r', JSLATE, 0.0, -0.2, 0.022, 'reach B')
-    move('Julian', [(t0 - 0.3, None), (t0 + 0.3, L), (t0 + 0.8, A), (t0 + 1.2, B), (t0 + 1.5, A), (t0 + 1.9, L), (t0 + 2.4, None)])
+def reach_slate(t0, hold=2.2):
+    """Julian leans in across the table and lays his fingers on his slate (they stop just above the screen), holds
+    them there while he connects it, and sits back."""
+    L = hover('Julian', 'r', lift_for('Julian', 'r', JSLATE), 'lift', exact=True)
+    A = over_slate('Julian', 'r', JSLATE, 0.6, -0.95, 0.05, 'reach A', exact=True)       # the corner nearest him
+    B = over_slate('Julian', 'r', JSLATE, 0.5, -0.8, 0.022, 'reach B', exact=True)
+    t2 = t0 + 1.2 + hold
+    move('Julian', [(t0 - 0.3, None), (t0 + 0.3, L), (t0 + 0.8, A), (t0 + 1.2, B), (t2, B), (t2 + 0.3, A), (t2 + 0.7, L), (t2 + 1.2, None)])
+    # his other hand slides down to brace on his knee as he leans in
+    c = CH['Julian']
+    KN = [float(v) for v in opt('--knee', '0.92,0.07,-0.2').split(',')]
+    EL = [float(v) for v in opt('--knee-elbow', '0.32,-0.12,-0.2').split(',')]
+    Kb = capture(c, 'l', lambda: rest_hand('Julian', 'l', KN[0], inward=KN[2], out=KN[1]), 'hand on knee', planted=True, follow=1.0,
+                 elbow=kit.joint(c['arm'], 'upperarm_l') + V(EL))        # the elbow out to his side
+    move('Julian', [(t0 - 0.3, None), (t0 + 0.6, Kb), (t2 + 0.5, Kb), (t2 + 1.3, None)])
+    CH['Julian']['leans'].append((t0 - 0.3, t2 + 0.9, float(opt('--julian-lean', 38))))
 
 
 # ------------------------------------------------------------------ direction: who does what when
@@ -859,7 +889,7 @@ for it in ITEMS:
     elif i == 32:
         point_at('Julian', 'l', HOLO_AT + V((0.3, 0.05, 0.05)), t0 + 0.5, t0 + 5.5, sweep=HOLO_AT + V((-0.3, 0.0, -0.05)))
     elif i == 49:
-        reach_slate(T(49, 0.35))
+        reach_slate(T(49, 0, 2.9))           # as the narrator says he connects it
     elif i == 50:
         point_at('Julian', 'l', HOLO_AT, t0 + 0.8, t0 + 5.5)
     elif i == 55:
@@ -899,6 +929,8 @@ def target_point(who, name, time):
         return CH[who]['slate'].matrix_world.translation
     if name == 'holo':
         return holo.CENTRE
+    if name == 'jslate':
+        return JSLATE.matrix_world.translation
     if name == 'down':
         return CH[who]['head_w'] + V((0, -0.6, -0.6))
     return V((0.2, -0.05, lounge.TABLE + 0.05))
@@ -968,6 +1000,13 @@ if 25 in BY:          # No one answers: they look away
     for w in ('Cleon', 'Aria', 'Julian'):
         LOOKS[w].append((T(25, 0.2), 'down' if w != 'Aria' else 'slate'))
         LOOKS[w].sort(key=lambda k: k[0])
+# when the narration turns to hands on a slate, its owner looks down at it, then up at what it brings
+if 29 in BY:
+    LOOKS['Aria'] += [(T(29, 0, 7.4), 'slate'), (T(29, 0, 11.7), 'holo')]
+    LOOKS['Aria'].sort(key=lambda k: k[0])
+if 49 in BY:
+    LOOKS['Julian'] += [(T(49, 0, 3.0), 'jslate'), (T(49, 0, 6.9), 'holo')]
+    LOOKS['Julian'].sort(key=lambda k: k[0])
 
 
 def gaze(who, time, yaw_extra=0.0):
@@ -1353,13 +1392,13 @@ SP0 = {who: fk(who, {}, 'spine_03', {}) for who in CH}
 ELBOW_FOLLOW = float(opt('--elbow-follow', 0.5))
 
 
-def plant(who, side, local, target=None):
+def plant(who, side, local, target=None, follow=None):
     """Upper arm, forearm and hand rotations that put the hand on a fixed spot (its resting place, or a gesture's
     target given as (hand matrix, elbow point)) in armature space; the elbow keeps its place relative to the chest."""
     c = CH[who]
     Hm, elbow = target or c['plant'][side]
     memo = {}
-    elbow = elbow.lerp(fk(who, local, 'spine_03', memo) @ SP0[who].inverted() @ elbow, ELBOW_FOLLOW)
+    elbow = elbow.lerp(fk(who, local, 'spine_03', memo) @ SP0[who].inverted() @ elbow, ELBOW_FOLLOW if follow is None else follow)
     up, lo, hd = 'upperarm_' + side, 'lowerarm_' + side, 'hand_' + side
     Msh = fk(who, local, 'shoulder_' + side, memo)
     rel_up = REL[who][up][0]
@@ -1464,7 +1503,7 @@ def frame_pose(who, f):
             w, pose = move_at(keys, time)
             if w > 0 and pose and b in pose:
                 if sd_ and ('_plant_' + sd_) in pose:
-                    tgt = plant(who, sd_, local, pose['_plant_' + sd_]) if b == 'upperarm_' + sd_ or ('_solved', sd_) not in planted else None
+                    tgt = plant(who, sd_, local, pose['_plant_' + sd_], pose.get('_follow_' + sd_)) if b == 'upperarm_' + sd_ or ('_solved', sd_) not in planted else None
                     if tgt:
                         planted[('_solved', sd_)] = tgt
                     q = q.slerp(planted[('_solved', sd_)][b], w)
@@ -1582,6 +1621,12 @@ if CHECK:
         apply_pose(w_, frame_pose(w_, f_)); kit.refresh()
         m_ = clearance.measure({w_: figs[w_]}, slates, lounge.boxes())
         print('DBG worst', sorted(((v, k) for k, v in m_.items()), key=lambda z: z[0])[:3])
+        for keys in c_['moves']:
+            w__, pose__ = move_at(keys, time_)
+            for sd__ in 'lr':
+                if w__ > 0.99 and pose__ and ('_plant_' + sd__) in pose__:
+                    tgt__ = pose__['_plant_' + sd__][0].translation
+                    print('DBG hand %s miss %.3f m' % (sd__, (c_['arm'].pose.bones['hand_' + sd__].matrix.translation - tgt__).length))
         sys.exit(0)
     fr0, fr1 = (int(x) for x in opt('--check-range', '0,%d' % END).split(','))
     for f in range(fr0, fr1, step):
@@ -1758,6 +1803,14 @@ CLOSE = {'Socrates': 'soc', 'Julian': 'jul', 'Cleon': 'cle', 'Aria': 'ari'}
 CLOSE2 = {'Julian': 'jul2', 'Cleon': 'cle2', 'Aria': 'ari2'}
 
 
+# insert shots for hands on a slate, looking down on the sitter leaning in over it: face and slate in one frame,
+# the slate clear of the subtitles (position x,y,z, aim x,y,z, lens; framed against the built scene)
+for key, who, spec in (('ari_s', 'Aria', opt('--ari-s', '0.82,-0.52,1.5,0.185,0.464,0.867,26')),
+                       ('jul_s', 'Julian', opt('--jul-s', '0.1,-0.9,1.5,1.017,0.048,0.897,24'))):
+    v_ = [float(x) for x in spec.split(',')]
+    CAMS[key] = stage.camera('Cam %s slate' % who, tuple(v_[:3]), tuple(v_[3:6]), v_[6])
+
+
 def looking_at(who, time):
     name = LOOKS[who][0][1]
     for (t0, n) in LOOKS[who]:
@@ -1820,6 +1873,22 @@ for it in ITEMS:
     prev = who
 if 73 in BY:            # the trio in the projection's glow, then Socrates waiting, eyes on it
     CUTS.append((T(73, 0.55), 'soc'))
+
+
+def even(time):
+    """The nearest time that falls on an even frame (pictures change on twos)."""
+    return round(time * FPS / 2) * 2 / FPS
+
+
+INSERTS = []            # (first frame, last frame) of shots added for what the narration says hands do
+if 29 in BY:            # "ARIA's fingers dance across her slate"
+    a_, b_ = even(T(29, 0, 8.1)), even(T(29, 0, 12.4))
+    CUTS += [(a_, 'ari_s'), (b_, 'holo')]
+    INSERTS.append((F(a_), F(b_) - 1))
+if 49 in BY:            # "JULIAN connects his slate to the central holographic projector"
+    a_, b_ = even(T(49, 0, 3.3)), even(T(49, 0, 6.8))
+    CUTS += [(a_, 'jul_s'), (b_, 'holo')]
+    INSERTS.append((F(a_), F(b_) - 1))
 CUTS.sort()
 for tm, name in CUTS:
     mk = sc.timeline_markers.new(name, frame=F(tm))
@@ -1828,7 +1897,7 @@ sc.camera = CAMS[CUTS[0][1]]
 stage.eevee(sc, WIDTH, WIDTH * 9 // 16, int(opt('--samples', 8)))
 
 plan = {'seq': SEQ, 'frames': [0, END - 1], 'fps': FPS, 'seconds': round(END / FPS, 2),
-        'cues': [{'id': it['id'], 't': round(it['t'], 4)} for it in ITEMS if it['id']], 'cuts': CUTS,
+        'cues': [{'id': it['id'], 't': round(it['t'], 4)} for it in ITEMS if it['id']], 'cuts': CUTS, 'inserts': INSERTS,
         'items': [(it['i'], it['who'], round(it['t'], 2), round(it['secs'], 2)) for it in ITEMS]}
 print('sequence', SEQ, 'frames', END, 'seconds %.1f' % (END / FPS), 'items', len(ITEMS), 'cuts', len(CUTS))
 if opt('--plan'):

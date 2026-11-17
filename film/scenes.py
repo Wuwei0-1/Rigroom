@@ -382,7 +382,7 @@ def s_whole(g, t, B, D):
         g.tag(x, y + 6, lab, TEAL, ap(t, 0.6 + i * 0.25), 16)
     for i in range(len(pts)):
         g.line([pts[i], pts[(i + 1) % len(pts)]], TEAL, kl * 0.8, 2)
-    g.text('interdependency', cx, cy + 200, 17, TEAL, kl, bold=True, align='c')
+    g.text('interdependency', cx, cy + 190, 17, TEAL, kl, bold=True, align='c')
     g.dot(cx, cy, 56, GOLD, k)
     g.text('φρόνησις', cx, cy + 7, 19, INK, k, bold=True, align='c')
     ke = ap(t, B['eud'], 0.7)
@@ -397,7 +397,7 @@ def s_growth(g, t, B, D):
     x0, y0, w, h = 420, 220, 700, 330
     g.axes(x0, y0, w, h, 'time', 'growth', MUTED, k)
     g.plot(x0, y0, w, h, lambda u: min(1.08, 0.04 * math.exp(3.3 * u)), min(1, (t - 0.5) / 4.0), CYAN, k, fill=True)
-    g.text('no end point: an unfinished picture', x0 + w - 20, y0 + 30, 18, CYAN, ap(t, B['unfinished']), bold=True, align='r')
+    g.text('no end point: an unfinished picture', x0 + 24, y0 + 34, 18, CYAN, ap(t, B['unfinished']), bold=True)
     # the panopticon: a ring of cells round a watchtower
     cx, cy = 230, 400
     for i in range(16):
@@ -462,7 +462,7 @@ def s_profile(g, t, B, D):
         tx, ty = 700 + (i % 14) * 34, 240 + (i // 14) * 34
         g.rrect(lerp(x, tx, dis) - 9, lerp(y, ty, dis) - 9, 18, 18, 3, fill=(*CYAN, 0.25 + 0.5 * ((i * 7) % 5 == 0)), a=k * dis)
     km = ap(t, B['means'], 0.6)
-    g.tag(940, 600, 'a means to an end', RED, km, 17)
+    g.tag(940, 588, 'a means to an end', RED, km, 17)
 
 
 def s_track(g, t, B, D):
@@ -511,15 +511,15 @@ def s_dendrites(g, t, B, D):
         for d in (-0.45, 0.4):
             branch(x2, y2, ang + d + rng.uniform(-0.15, 0.15), L * 0.72, depth - 1, rng)
     for i, base in enumerate((-math.pi / 2, -math.pi / 2 - 1.0, -math.pi / 2 + 1.0, math.pi / 2)):
-        branch(640, 400, base, 90 if i < 3 else 70, 6, _r.Random(i + 3))
-    g.dot(640, 400, 22, CYAN, k)
-    g.text('healthy' if shrink < 0.5 else 'after chronic cortisol', 640, 610, 20, CYAN if shrink < 0.5 else RED, k, bold=True, align='c')
+        branch(640, 390, base, 86 if i < 3 else 46, 6, _r.Random(i + 3))
+    g.dot(640, 390, 22, CYAN, k)
+    g.text('healthy' if shrink < 0.5 else 'after chronic cortisol', 640, 588, 20, CYAN if shrink < 0.5 else RED, k, bold=True, align='c')
 
 
 def s_chariot(g, t, B, D):
     g.background(t, GOLD, 32)
     g.header(t, 'Plato, Phaedrus', 'The soul as a charioteer', 'Reason guides two horses that pull different ways', GOLD)
-    kc = ap(t, B['char'], 0.7)
+    kc = ap(t, min(B['char'], 0.8), 0.7)
     g.charioteer(250, 470, 1.8, GOLD, kc)
     g.text('Charioteer: Reason (Logos)', 250, 560, 20, GOLD, kc, bold=True, align='c')
     k1 = ap(t, B['noble'], 0.7)
@@ -540,7 +540,7 @@ def s_chariot2(g, t, B, D):
     slump = ap(t, B['out'], 1.2)
     k = ap(t, 0.3)
     g.charioteer(330, 480, 1.3, mix(GOLD, MUTED, slump), k, slump=slump)
-    g.bar(200, 595, 260, 14, 1 - 0.92 * slump, mix(GOLD, RED, slump), k, 'executive control', '')
+    g.bar(200, 578, 260, 14, 1 - 0.92 * slump, mix(GOLD, RED, slump), k, 'executive control', '')
     bolt = ap(t, B['bolt'], 3.0)
     g.horse(640 + 420 * bolt, 400, 1.15, WHITE, k * (1 - 0.7 * bolt), gallop=t * (3 + 5 * bolt))
     kl = ap(t, B['map'], 0.8)
@@ -566,9 +566,9 @@ def s_whip(g, t, B, D):
     g.dot(250, 270, 12, RED, ka)
     g.text('amygdala, hijacked', 240, 340, 16, RED, ka, bold=True, align='c')
     kg = ap(t, B['anger'], 0.7)
-    g.tag(560, 600, 'confusion', MUTED, kg, 17)
-    g.arrow(640, 593, 760, 593, kg, RED)
-    g.tag(900, 600, 'focused, external anger', RED, kg, 17)
+    g.tag(560, 588, 'confusion', MUTED, kg, 17)
+    g.arrow(640, 581, 760, 581, kg, RED)
+    g.tag(900, 588, 'focused, external anger', RED, kg, 17)
 
 
 def s_neurochem(g, t, B, D):
@@ -664,7 +664,7 @@ def s_fire(g, t, B, D):
     g.text('heart rate rising', 880, 250, 18, RED, kh, bold=True, align='c')
     ko = ap(t, B['observe'], 0.6)
     g.eye(880, 520, 1.0, TEAL, ko, open_=0.3 + 0.7 * ap(t, B['observe'], 1.0))
-    g.text('observe the heat, before the mind latches on', 880, 600, 18, TEAL, ko, bold=True, align='c')
+    g.text('observe the heat, before the mind latches on', 880, 590, 18, TEAL, ko, bold=True, align='c')
 
 
 def s_water(g, t, B, D):

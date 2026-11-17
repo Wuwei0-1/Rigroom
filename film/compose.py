@@ -2,7 +2,8 @@
 
     python compose.py cut SHOT.mp4 GRAPHICS_DIR SEQ OUT.mp4
         Lays each graphic of sequence SEQ (from GRAPHICS_DIR/graphics.json) over the shot at its time, dissolving
-        in and out over a third of a second. The shot's sound runs on underneath.
+        in and out over a third of a second; graphics that follow one another at once dissolve straight from one
+        to the next. The shot's sound runs on underneath.
 
     python compose.py srt SCRIPT.json PHRASES.json OUT.srt --plans P1.json,P2.json,... --offsets O1,O2,...
         Subtitles for every spoken line and narration, one or two lines at a time, timed to the phrases.
@@ -15,6 +16,7 @@ import subprocess
 import sys
 
 FADE = 0.35
+JOIN = 1.5        # graphics closer together than this dissolve straight into each other
 NAMES = {'CLEON', 'ARIA', 'JULIAN', 'SOCRATES'}
 
 
@@ -24,11 +26,20 @@ def cut(shot, gdir, seq, out):
     for w in wins:
         args += ['-i', os.path.join(gdir, w['id'] + '.mp4')]
     chains, last = [], '0:v'
+    wins.sort(key=lambda w: w['t0'])
     for k, w in enumerate(wins):
         d = w['t1'] - w['t0']
-        chains.append('[%d:v]format=yuva420p,fade=t=in:st=0:d=%.3f:alpha=1,fade=t=out:st=%.3f:d=%.3f:alpha=1,setpts=PTS-STARTPTS+%.3f/TB[g%d]'
-                      % (k + 1, FADE, d - FADE, FADE, w['t0'], k))
-        chains.append('[%s][g%d]overlay=eof_action=pass:enable=\'between(t,%.3f,%.3f)\'[v%d]' % (last, k, w['t0'], w['t1'], k))
+        nxt = wins[k + 1] if k + 1 < len(wins) else None
+        f = '[%d:v]format=yuva420p,fade=t=in:st=0:d=%.3f:alpha=1' % (k + 1, FADE)
+        if nxt is not None and nxt['t0'] - w['t1'] < JOIN:
+            # the next graphic follows at once: hold this one's last frame under it, so one dissolves into the other
+            end = nxt['t0'] + FADE + 0.05
+            f += ',tpad=stop_mode=clone:stop_duration=%.3f' % (end - w['t1'] + 0.5)
+        else:
+            end = w['t1']
+            f += ',fade=t=out:st=%.3f:d=%.3f:alpha=1' % (d - FADE, FADE)
+        chains.append(f + ',setpts=PTS-STARTPTS+%.3f/TB[g%d]' % (w['t0'], k))
+        chains.append('[%s][g%d]overlay=eof_action=pass:enable=\'between(t,%.3f,%.3f)\'[v%d]' % (last, k, w['t0'], end, k))
         last = 'v%d' % k
     if wins:
         args += ['-filter_complex', ';'.join(chains), '-map', '[%s]' % last]
