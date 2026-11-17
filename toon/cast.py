@@ -14,6 +14,20 @@ from kit import Body, capsule, curls, frustum, material, ring, slab, sphere, tub
 V = Vector
 
 
+RING_ON = 'Socrates'     # who wears the brass ring (Gyges IV: Julian)
+SPLIT_SKIRT = False     # Gyges IV: the long skirt of a chiton is its own object (hidden on a seated figure), with a short one on the body
+
+
+def skirt_object(arm, who, top, hem, r0, r1, mat, squash=0.8, extra=()):
+    """The long part of a skirt as its own skinned object, bound to the hips, named '<who> skirt'."""
+    cx, cy = joints(arm)['hip'].x, joints(arm)['hip'].y
+    S = Body(who + ' skirt')
+    S.add(frustum((cx, cy, top), (cx, cy, hem), r0, r1, caps=False, squash=squash, seg=28), 'hip', mat)
+    for shape, m in extra:
+        S.add(shape, 'hip', m)
+    return S.finish(arm)
+
+
 def joints(arm):
     return {b.name: b.head_local.copy() for b in arm.data.bones}
 
@@ -183,7 +197,11 @@ def socrates(arm):
         B.add(ring(an + V((0, -0.09, -0.012)), 0.05, 0.011, rot=Quaternion((1, 0, 0), math.pi / 2), tseg=6, seg=16), 'foot_' + side, sandal)
     # the chiton's skirt to mid-shin, and the himation over the left shoulder
     hz = j['hip'].z
-    B.add(frustum((cx, cy, hz + 0.02), (cx, cy, 0.34), 0.2, 0.25, caps=False, squash=0.8, seg=28), 'hip', tunic)
+    if SPLIT_SKIRT:
+        B.add(frustum((cx, cy, hz + 0.02), (cx, cy, hz - 0.12), 0.2, 0.208, caps=False, squash=0.8, seg=28), 'hip', tunic)
+        skirt_object(arm, 'Socrates', hz + 0.0, 0.34, 0.199, 0.25, tunic)
+    else:
+        B.add(frustum((cx, cy, hz + 0.02), (cx, cy, 0.34), 0.2, 0.25, caps=False, squash=0.8, seg=28), 'hip', tunic)
     sp3 = j['spine_03']
     path = [(cx - 0.16, cy + 0.11, hz + 0.1), (cx - 0.2, cy - 0.02, hz + 0.14), (cx - 0.13, cy - 0.15, hz + 0.24), (cx, cy - 0.175, sp3.z - 0.1),
             (cx + 0.11, cy - 0.13, sp3.z + 0.06), (cx + 0.15, cy - 0.01, sp3.z + 0.15), (cx + 0.12, cy + 0.12, sp3.z + 0.07), (cx + 0.02, cy + 0.17, sp3.z - 0.12),
@@ -199,7 +217,8 @@ def socrates(arm):
     B.add(ring((cx + 0.085, cy - 0.176, sp3.z + 0.035), 0.022, 0.006, rot=Quaternion((1, 0, 0), math.pi / 2), tseg=6, seg=16), 'spine_03', gold)
     # a brass ring on the pointing hand
     hr = j['hand_r']
-    B.add(ring(hr + V((-0.118, -0.041, 0)), 0.02, 0.006, rot=Quaternion((0, 1, 0), math.pi / 2), tseg=6, seg=14), 'hand_r', gold)
+    if RING_ON == 'Socrates':
+        B.add(ring(hr + V((-0.118, -0.041, 0)), 0.02, 0.006, rot=Quaternion((0, 1, 0), math.pi / 2), tseg=6, seg=14), 'hand_r', gold)
     B.add(capsule(j['neck'], j['head'] + V((0, 0, 0.02)), 0.058, 0.055), 'neck', m['skin'])
     Hd = Head((cx, cy - 0.02, j['head'].z + 0.115), (0.152, 0.158, 0.152))
     B.add(sphere(Hd.C, Hd.R, seg=28, rings=18), 'head', m['skin'])
@@ -306,6 +325,9 @@ def julian(arm):
     trousers = material('Julian trousers', '#343844', rough=0.8)
     shoe = material('Julian shoe', '#1f1c1c', rough=0.4)
     B = Body('Julian')
+    if RING_ON == 'Julian':
+        brass = material('Ring brass', '#d9a836', rough=0.3, metal=1.0)
+        B.add(ring(j['hand_r'] + V((-0.118, -0.041, 0)), 0.02 * 0.9, 0.006, rot=Quaternion((0, 1, 0), math.pi / 2), tseg=6, seg=14), 'hand_r', brass)
     cx, cy = j['hip'].x, j['hip'].y
     torso(B, j, vest, 0.15, 0.142, 0.176, depth=0.74, mat_low=trousers)
     for side in 'lr':
