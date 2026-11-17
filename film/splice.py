@@ -36,19 +36,33 @@ def main(argv):
             sys.exit('%s and %s overlap' % (pa, pb))
     if patches[-1][1] >= total:
         sys.exit('%s runs past the end of the base (%d frames)' % (patches[-1][2], total))
-    inputs, parts, f = ['-i', base], [], 0
-    for i, (p0, p1, path, (pw, ph)) in enumerate(patches, 1):
-        inputs += ['-i', path]
+    # each stretch is encoded on its own and the pieces joined without re-encoding, so nothing has to be held in memory
+    import os
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix='splice_')
+    enc = ['-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', '%g' % fps]
+    pieces, f = [], 0
+
+    def piece(args):
+        path = os.path.join(tmp, 'p%03d.mp4' % len(pieces))
+        subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y'] + args + enc + [path], check=True)
+        pieces.append(path)
+    for p0, p1, path, (pw, ph) in patches:
         if p0 > f:
-            parts.append('[0:v]trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS[s%d]' % (f, p0, len(parts)))
-        parts.append('[%d:v]scale=%d:%d,setsar=1,setpts=PTS-STARTPTS[s%d]' % (i, w, h, len(parts)))
+            piece(['-i', base, '-vf', 'trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS' % (f, p0)])
+        piece(['-i', path, '-vf', 'scale=%d:%d,setsar=1,setpts=PTS-STARTPTS' % (w, h)])
         f = p1 + 1
     if f < total:
-        parts.append('[0:v]trim=start_frame=%d,setpts=PTS-STARTPTS[s%d]' % (f, len(parts)))
-    graph = ';'.join(parts) + ';' + ''.join('[s%d]' % i for i in range(len(parts))) + 'concat=n=%d:v=1:a=0,format=yuv420p[v]' % len(parts)
-    cmd = ['ffmpeg', '-nostdin', '-v', 'error', '-y'] + inputs + ['-filter_complex', graph, '-map', '[v]', '-map', '0:a?',
-           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-r', '%g' % fps, '-c:a', 'copy', '-movflags', '+faststart', out]
+        piece(['-i', base, '-vf', 'trim=start_frame=%d,setpts=PTS-STARTPTS' % f])
+    lst = os.path.join(tmp, 'list.txt')
+    with open(lst, 'w') as fh:
+        fh.write(''.join("file '%s'\n" % x for x in pieces))
+    cmd = ['ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', base, '-map', '0:v', '-map', '1:a?',
+           '-c', 'copy', '-movflags', '+faststart', out]
     subprocess.run(cmd, check=True)
+    for x in pieces + [lst]:
+        os.remove(x)
+    os.rmdir(tmp)
     n, *_ = probe(out)
     print('%s: %d frames (base %d), %d stretch(es) replaced' % (out, n, total, len(patches)))
     if n != total:
