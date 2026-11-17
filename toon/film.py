@@ -144,7 +144,7 @@ def screens_key(name, frame, v):
 
 
 SOC_SPOT = V((-0.75, 1.85, 0))
-PLACES = {'Cleon': ((-1.53, 0.12, 0), 62, 1.0), 'Aria': ((0.16, 0.8, 0), 0, 0.93), 'Julian': ((1.58, 0.12, 0), -62, 1.06), 'Socrates': (tuple(SOC_SPOT), 8, 1.08)}
+PLACES = {'Cleon': ((-1.53, 0.12, 0), 62, 1.0), 'Aria': ((0.16, 0.8, 0), 0, 0.93), 'Julian': ((1.52, 0.12, 0), -62, 1.06), 'Socrates': (tuple(SOC_SPOT), 8, 1.08)}
 CH = {}
 for who, (loc, yaw, scale) in PLACES.items():
     arm, body, Hd = stage.cast_one(src, who, loc, math.radians(yaw), scale)
@@ -305,7 +305,8 @@ def slate_at(name, loc, yaw=0.0, tilt=0.0):
 ARM_BONES = lambda sd: ['shoulder_' + sd, 'upperarm_' + sd, 'lowerarm_' + sd, 'hand_' + sd]
 LID_OPEN = {'Cleon': -38, 'Aria': -48, 'Julian': -30, 'Socrates': -22}
 SOC_OUT = float(opt('--soc-out', 0.2))
-YW = (0.1, 0.36, 0.52)         # how a turn of the gaze is shared by the chest, neck and head
+YW = (0.1, 0.36, 0.52)         # how a turn of the gaze is shared by the chest, neck and head (standing)
+YW_SEATED = (0.0, 0.42, 0.56)  # seated, the chest stays square to the resting arms
 SLATE_HELD = SEQ <= 2       # Cleon holds his slate in the first two sequences; from the third it lies on the seat beside him
 
 # ---- base poses: seated hands rest on the thighs, clear of them; slates lie on a palm or on the table
@@ -315,7 +316,8 @@ rest_hand('Cleon', 'l', out=0.03)
 if SLATE_HELD:
     c['slate'] = slate_on_palm('Cleon', 'r', 'Slate Cleon', (0.13, -0.33, -0.22))
 else:
-    rest_hand('Cleon', 'r', out=0.055, inward=0.0)
+    _al, _ou, _in = (float(v) for v in opt('--cleon-r', '0.85,0.07,-0.1').split(','))
+    rest_hand('Cleon', 'r', _al, out=_ou, inward=_in)
     c['slate'] = slate_at('Slate Cleon', (-1.47, 0.47, lounge.SEAT + 0.002), yaw=62 + 15)
 
 c = CH['Aria']; a = c['arm']
@@ -581,7 +583,8 @@ for who in CH:
 
 def look_now(who, yaw, pitch):
     c = CH[who]
-    for b, ky, kp in (('spine_03', YW[0], 0.0), ('neck', YW[1], 0.35), ('head', YW[2], 0.5)):
+    yw = YW if who == 'Socrates' else YW_SEATED
+    for b, ky, kp in (('spine_03', yw[0], 0.0), ('neck', yw[1], 0.35), ('head', yw[2], 0.5)):
         pb = c['arm'].pose.bones[b]
         pb.rotation_quaternion = c['base'][b][0] @ Quaternion(c['axz'][b], yaw * ky) @ Quaternion(c['axx'][b], -pitch * kp)
     kit.refresh()
@@ -601,6 +604,16 @@ def explain_pose(who, side, var):
     return capture(c, side, lambda: place_hand(arm, side, p, f, n, S + V((sg * 0.5, -0.45, -0.5)) if not standing else S + V((sg * 0.6, 0.15, -0.45))), 'explain %s %.0f' % (side, var))
 
 
+def waypoint(who, side):
+    """A seated hand lifted forward off its thigh, palm down: the way between the lap and a gesture."""
+    c = CH[who]; arm = c['arm']
+    sg = 1 if side == 'l' else -1
+    S = kit.joint(arm, 'upperarm_' + side)
+    hp, kn = kit.joint(arm, 'upperleg_' + side), kit.joint(arm, 'lowerleg_' + side)
+    p = kn.lerp(hp, 0.15) + V((sg * 0.07, -0.12, 0.2))
+    return capture(c, side, lambda: place_hand(arm, side, p, V((-sg * 0.2, -1.0, 0.1)), V((0, 0, -1)), S + V((sg * 0.9, 0.0, -0.2))), 'way %s' % side)
+
+
 def explain(who, t0, t1):
     """Talking gestures through a long line: the free hand rises, makes a point or two, and settles."""
     sides = FREE[who]
@@ -609,7 +622,12 @@ def explain(who, t0, t1):
         side = sides[k % len(sides)]
         A, B = explain_pose(who, side, 0.0), explain_pose(who, side, 1.0)
         dur = rng.uniform(2.6, 3.6)
-        move(who, [(tt, None), (tt + 0.55, A), (tt + dur * 0.5, B), (tt + dur - 0.5, A), (tt + dur, None)])
+        if who in ('Socrates', 'Aria'):      # Socrates stands; Aria's lap is under the table's edge
+            move(who, [(tt, None), (tt + 0.55, A), (tt + dur * 0.5, B), (tt + dur - 0.5, A), (tt + dur, None)])
+        else:
+            # a seated hand comes up off the lap forwards, clear of the waist, before it turns to make its point
+            Wp = waypoint(who, side)
+            move(who, [(tt, None), (tt + 0.3, Wp), (tt + 0.65, A), (tt + dur * 0.5, B), (tt + dur - 0.6, A), (tt + dur - 0.3, Wp), (tt + dur, None)])
         tt += dur + rng.uniform(2.8, 4.8)
         k += 1
 
@@ -766,7 +784,7 @@ def cross_arms(t0, t1):
     """Cleon folds his arms: the left forearm across the waist, the right over it and in front, hands clear."""
     c = CH['Cleon']; arm = c['arm']
     sp = kit.joint(arm, 'spine_03')
-    CROSS = [float(v) for v in opt('--cross', '0.1,-0.32,-0.14,0.1,-0.42,-0.05').split(',')]
+    CROSS = [float(v) for v in opt('--cross', '0.1,-0.4,-0.1,0.1,-0.5,-0.02').split(',')]
 
     def fn():
         for sd, sg, (dx, dy, dz) in (('l', 1, CROSS[:3]), ('r', -1, CROSS[3:])):
@@ -1332,6 +1350,7 @@ def fk(who, local, bone, memo):
 
 
 SP0 = {who: fk(who, {}, 'spine_03', {}) for who in CH}
+ELBOW_FOLLOW = float(opt('--elbow-follow', 0.5))
 
 
 def plant(who, side, local, target=None):
@@ -1340,7 +1359,7 @@ def plant(who, side, local, target=None):
     c = CH[who]
     Hm, elbow = target or c['plant'][side]
     memo = {}
-    elbow = fk(who, local, 'spine_03', memo) @ SP0[who].inverted() @ elbow
+    elbow = elbow.lerp(fk(who, local, 'spine_03', memo) @ SP0[who].inverted() @ elbow, ELBOW_FOLLOW)
     up, lo, hd = 'upperarm_' + side, 'lowerarm_' + side, 'hand_' + side
     Msh = fk(who, local, 'shoulder_' + side, memo)
     rel_up = REL[who][up][0]
@@ -1410,6 +1429,7 @@ def frame_pose(who, f):
             hold, xf = w, hx
             yaw, pitch = yaw + (hy - yaw) * w, pitch + (hp - pitch) * w
     ex = expr_at(who, time)
+    yw = YW if standing else YW_SEATED
     lean = sum(d * window(t0, t1, 0.6)(time) for (t0, t1, d) in c['leans'])
     nod = sum(math.radians(a_) * math.sin(2 * math.pi * 0.9 * (time - t0)) * window(t0, t1, 0.4)(time) for (t0, t1, a_) in c['nods'])
     wx = (dist / (STRIDE * 1.08) * (W1 - W0)) if (WALK and wmix > 0) else 0.0
@@ -1455,13 +1475,13 @@ def frame_pose(who, f):
         elif b == 'spine_02' and lean:
             q = q @ Quaternion(c['axx'][b], math.radians(lean) * 0.6)
         if b == 'spine_03':
-            q = q @ Quaternion(c['axz'][b], yaw * YW[0])
+            q = q @ Quaternion(c['axz'][b], yaw * yw[0])
         elif b == 'neck':
-            q = q @ Quaternion(c['axz'][b], yaw * YW[1]) @ Quaternion(c['axx'][b], -pitch * 0.35)
+            q = q @ Quaternion(c['axz'][b], yaw * yw[1]) @ Quaternion(c['axx'][b], -pitch * 0.35)
         elif b == 'head':
             bob = math.radians(4.0) * (talk_s - 0.25) if talk_s > 0.02 else 0.0
             bow = math.radians(ex.get('head', 0.0))
-            q = q @ Quaternion(c['axz'][b], yaw * YW[2]) @ Quaternion(c['axx'][b], -pitch * 0.5 + (bob + nod + bow) * (1 - hold))
+            q = q @ Quaternion(c['axz'][b], yaw * yw[2]) @ Quaternion(c['axx'][b], -pitch * 0.5 + (bob + nod + bow) * (1 - hold))
         local[b] = q
         out['pose.bones["%s"].rotation_quaternion' % b] = tuple(q)
     if standing:
@@ -1553,7 +1573,18 @@ if CHECK:
         sys.exit(0)
     bad = {}
     step = int(CHECK)
-    for f in range(0, END, step):
+    if opt('--debug-frame'):
+        f_, w_ = opt('--debug-frame').split(',')
+        f_ = int(f_); time_ = f_ / FPS; c_ = CH[w_]
+        print('DBG moves', [(k[0][0], k[-1][0], round(move_at(k, time_)[0], 2), [n for n in (move_at(k, time_)[1] or {}) if n.startswith('_')]) for k in c_['moves'] if k[0][0] <= time_ <= k[-1][0]])
+        print('DBG leans', [l for l in c_['leans'] if l[0] <= time_ <= l[1]], 'nods', [n for n in c_['nods'] if n[0] <= time_ <= n[1]], 'still', c_['still'])
+        print('DBG gaze', gaze(w_, time_), 'look', looking_at(w_, time_) if 'looking_at' in globals() else None, 'expr', expr_at(w_, time_))
+        apply_pose(w_, frame_pose(w_, f_)); kit.refresh()
+        m_ = clearance.measure({w_: figs[w_]}, slates, lounge.boxes())
+        print('DBG worst', sorted(((v, k) for k, v in m_.items()), key=lambda z: z[0])[:3])
+        sys.exit(0)
+    fr0, fr1 = (int(x) for x in opt('--check-range', '0,%d' % END).split(','))
+    for f in range(fr0, fr1, step):
         for who in CH:
             apply_pose(who, frame_pose(who, f))
         kit.refresh()
@@ -1705,11 +1736,12 @@ CAMS = {
     'rev': stage.camera('Cam reverse', (-1.35, 2.45, 2.05), (0.35, -0.1, 0.95), 30),
 }
 if SEQ == 2:
-    pc = stage.camera('Cam pacing', (0.0, -2.6, 2.25), (0, 1.6, 1.6), 42)
-    con = pc.constraints.new('DAMPED_TRACK')
+    pc = stage.camera('Cam pacing', (0.2, 0.5, 2.2), (0, 1.85, 1.6), 30)      # past the pendant lamp, above the hologram
+    con = pc.constraints.new('TRACK_TO')        # follows his head, horizon level
     con.target = soc['arm']
     con.subtarget = 'head'
     con.track_axis = 'TRACK_NEGATIVE_Z'
+    con.up_axis = 'UP_Y'
     CAMS['pace'] = pc
 # a second close-up for each sitter, from in front: for when they look down at a slate or into the projection
 for who, key, side in (('Cleon', 'cle2', 1), ('Julian', 'jul2', -1), ('Aria', 'ari2', 0)):
