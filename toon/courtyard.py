@@ -34,14 +34,40 @@ def arc_seat(deg, r=ARC_R):
 
 SEATS = {
     'arc25': arc_seat(22), 'arc45': arc_seat(43), 'arc70': arc_seat(67), 'cephalus': arc_seat(90, ARC_R + 0.05),
-    'arc110': arc_seat(113), 'arc135': arc_seat(137), 'arc158': arc_seat(158),
+    'arc110': arc_seat(113), 'arc135': arc_seat(137), 'arc158': arc_seat(158), 'arc178': arc_seat(179, ARC_R + 0.05),
     'bench1': (-2.95, -0.55, 90.0), 'bench2': (-2.95, 0.2, 90.0),
 }
 CHAIR_KIND = {k: ('throne' if k == 'cephalus' else ('bench' if k.startswith('bench') else 'chair')) for k in SEATS}
-# where people stand: the middle; by the column on the right, where Julian hides
-SPOTS = {'mid': (MID.x, MID.y, 0.0), 'column': (3.22, -0.35, -62.0)}
+# where people stand or sit on the floor (x, y); which way they face is given by whoever places them
+SPOTS = {'mid': (MID.x, MID.y), 'mid_left': (-0.38, 0.3), 'mid_right': (0.38, 0.3),
+         'column': (3.22, -0.35), 'column_floor': (3.2, -0.45),          # by the right-hand column, where Julian hides
+         'back_column_floor': (-1.8, 2.52),                              # against a column behind the chairs
+         'wall_front': (0.9, -3.05),                                     # among the shadows on the front wall
+         'corner': (3.15, -2.3), 'corner_floor': (3.2, -2.3), 'before_corner': (2.45, -1.75),
+         'altar': (-2.55, -1.72), 'gate_in': (4.0, -2.35), 'gate_out': (6.2, -2.35),
+         'pace_a': (-0.85, 0.05), 'pace_b': (0.85, 0.05), 'toward_gate': (1.75, -0.95),
+         'block_a': (2.71, -1.04), 'block_b': (2.41, -1.66), 'by_julian': (3.0, -0.95)}
 COLUMNS = [(-3.6, 2.85), (-1.8, 2.85), (0.0, 2.85), (1.8, 2.85), (3.6, 2.85), (3.62, 1.05), (3.62, -0.75), (3.62, -2.55)]
-LAMPS = [(-1.05, 2.45, 1.52), (1.05, 2.45, 1.52), (-3.15, 1.25, 1.52), (2.9, 1.65, 1.52)]
+LAMPS = [(-1.05, 2.45, 1.52), (1.05, 2.45, 1.52), (-3.15, 1.25, 1.52), (2.9, 1.65, 1.52), (0.9, 3.45, 0.62)]
+BACK_LAMP = 4            # a low lamp behind the chairs: lit alone, it throws the company's shadows up the front wall
+# named points to look at
+LOOKS = {'gate': (6.5, -2.35, 1.9), 'sky': (-3.0, 1.0, 7.0), 'wall': (0.6, -4.2, 1.7), 'altar': (-2.55, -2.35, 1.0), 'column': (3.62, -0.75, 1.4),
+         'back_column': (-1.8, 2.85, 0.7), 'corner': (3.2, -2.3, 0.7), 'corner_up': (3.15, -2.3, 1.6), 'mid': (0.0, 0.25, 1.3)}
+# cameras: name -> (position, aim, lens)
+CAMERAS = {
+    'wide': ((0.75, -3.95, 1.75), (0.55, 1.1, 0.95), 20),
+    'reverse': ((1.25, 3.3, 1.95), (-0.25, -0.6, 1.0), 24),
+    'side': ((-2.1, -3.9, 1.8), (1.0, 1.5, 1.0), 24),
+    'high': ((0.0, -3.8, 3.3), (0.0, 1.0, 0.5), 20),
+    'wall': ((-0.2, 2.3, 1.75), (0.4, -4.2, 1.7), 22),
+    'wall_julian': ((1.3, 0.2, 1.65), (0.75, -4.2, 1.5), 28),
+    'gate': ((1.4, 0.9, 1.45), (4.6, -2.3, 1.5), 28),
+    'altar': ((-0.9, -0.6, 1.6), (-2.55, -2.1, 1.15), 30),
+    'corner': ((0.4, 0.3, 1.55), (3.1, -2.2, 1.0), 30),
+    'follow': ((0.0, -3.9, 1.65), (0.0, 0.5, 1.2), 26),
+    'chair': ((0.95, 0.35, 1.25), (0.0, 2.33, 0.62), 34),
+    'column_view': ((1.35, 0.55, 1.25), (3.2, -0.42, 0.85), 30),
+}
 ALTAR = (-2.55, -2.35)
 
 

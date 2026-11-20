@@ -199,7 +199,8 @@ def socrates(arm):
     hz = j['hip'].z
     if SPLIT_SKIRT:
         B.add(frustum((cx, cy, hz + 0.02), (cx, cy, hz - 0.12), 0.2, 0.208, caps=False, squash=0.8, seg=28), 'hip', tunic)
-        skirt_object(arm, 'Socrates', hz + 0.0, 0.34, 0.199, 0.25, tunic)
+        skirt_object(arm, 'Socrates', hz + 0.0, 0.34, 0.199, 0.25, tunic,
+                     extra=[(tube([(cx + 0.2, cy + 0.12, hz + 0.16), (cx + 0.2, cy + 0.12, hz + 0.05), (cx + 0.19, cy + 0.11, hz - 0.25)], [0.1, 0.1, 0.08], seg=12, flat=0.4), wrap)])
     else:
         B.add(frustum((cx, cy, hz + 0.02), (cx, cy, 0.34), 0.2, 0.25, caps=False, squash=0.8, seg=28), 'hip', tunic)
     sp3 = j['spine_03']
@@ -211,8 +212,12 @@ def socrates(arm):
         t = min(1.0, max(0.0, (co.z - j['spine_01'].z) / (sp3.z - j['spine_01'].z)))
         return {'spine_01': 1 - t, 'spine_03': t}
     B.add(tube(path, [0.085, 0.09, 0.095, 0.1, 0.1, 0.1, 0.1, 0.095, 0.09], seg=12, flat=0.42), None, wrap, weights=wz)
-    B.add(tube([(cx + 0.15, cy + 0.04, sp3.z + 0.14), (cx + 0.19, cy + 0.1, sp3.z - 0.1), (cx + 0.2, cy + 0.12, hz + 0.05), (cx + 0.19, cy + 0.11, hz - 0.25)],
-               [0.09, 0.1, 0.1, 0.08], seg=12, flat=0.4), None, wrap, weights=wz)
+    if SPLIT_SKIRT:     # the hanging end below the waist goes with the long skirt (hidden when he sits)
+        B.add(tube([(cx + 0.15, cy + 0.04, sp3.z + 0.14), (cx + 0.19, cy + 0.1, sp3.z - 0.1), (cx + 0.2, cy + 0.12, hz + 0.12)],
+                   [0.09, 0.1, 0.1], seg=12, flat=0.4), None, wrap, weights=wz)
+    else:
+        B.add(tube([(cx + 0.15, cy + 0.04, sp3.z + 0.14), (cx + 0.19, cy + 0.1, sp3.z - 0.1), (cx + 0.2, cy + 0.12, hz + 0.05), (cx + 0.19, cy + 0.11, hz - 0.25)],
+                   [0.09, 0.1, 0.1, 0.08], seg=12, flat=0.4), None, wrap, weights=wz)
     B.add(sphere((cx + 0.085, cy - 0.165, sp3.z + 0.035), (0.045, 0.016, 0.045)), 'spine_03', gold)
     B.add(ring((cx + 0.085, cy - 0.176, sp3.z + 0.035), 0.022, 0.006, rot=Quaternion((1, 0, 0), math.pi / 2), tseg=6, seg=16), 'spine_03', gold)
     # a brass ring on the pointing hand

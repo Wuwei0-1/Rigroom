@@ -17,7 +17,8 @@ import sys
 
 FADE = 0.35
 JOIN = 1.5        # graphics closer together than this dissolve straight into each other
-NAMES = {'CLEON', 'ARIA', 'JULIAN', 'SOCRATES'}
+NAMES = {'CLEON', 'ARIA', 'JULIAN', 'SOCRATES', 'GLAUCON', 'ADEIMANTUS', 'CEPHALUS', 'POLEMARCHUS', 'THRASYMACHUS', 'LYSIAS', 'EUTHYDEMUS',
+         'NICERATUS', 'CHARMANTIDES', 'CLEITOPHON'}
 
 
 def cut(shot, gdir, seq, out):
