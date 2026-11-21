@@ -21,7 +21,7 @@ for n in 1 2 3 4 5 6 7; do
 done
 python3 $FILM/assemble.py $W/joined.mp4 "card:The Ring of Gyges IV|Out of the Cave" \
   $W/seq1.mp4 $W/seq2.mp4 $W/seq3.mp4 $W/seq4.mp4 $W/seq5.mp4 $W/seq6.mp4 $W/seq7.mp4 \
-  "end:The Ring of Gyges IV  ·  wuwei0-1.github.io/Wuwei01"
+  "end:wuwei0-1.github.io/Wuwei01"
 python3 $FILM/compose.py srt $G/script.json $G/phrases.json $W/gyges4.srt --plans $PLANS --offsets $OFFS
 ffmpeg -nostdin -loglevel error -y -i $W/joined.mp4 \
   -vf "subtitles=$W/gyges4.srt:force_style='FontName=Inter,FontSize=12,BorderStyle=3,Outline=1,Shadow=0,BackColour=&H90000000,MarginV=16'" \
