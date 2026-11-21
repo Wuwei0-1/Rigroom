@@ -23,6 +23,7 @@ NAMES = {'CLEON', 'ARIA', 'JULIAN', 'SOCRATES', 'GLAUCON', 'ADEIMANTUS', 'CEPHAL
 
 def cut(shot, gdir, seq, out):
     wins = [w for w in json.load(open(os.path.join(gdir, 'graphics.json'))) if w['seq'] == int(seq)]
+    wins.sort(key=lambda w: w['t0'])        # before the inputs are listed: input k+1 must be the k-th graphic in time
     args = ['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', shot]
     for w in wins:
         args += ['-i', os.path.join(gdir, w['id'] + '.mp4')]
