@@ -40,6 +40,7 @@ def all_seated(places):
 
 
 def seq2(S):
+    S.prop('hide', 0.0, who='Julian', on=True)
     S.scene(0.0, 'court', 'LATE AFTERNOON')
     seat_all(S, 0.0, COMPANY, {'Thrasymachus': ('stand', 'mid', 'Socrates'), 'Julian': ('stand', 'column', 'mid')})
     S.visible('Julian', 0.0, False)
@@ -108,6 +109,7 @@ def seq2(S):
 
 
 def seq3(S):
+    S.prop('hide', 0.0, who='Julian', on=True)
     S.scene(0.0, 'court', 'DUSK')
     seat_all(S, 0.0, COMPANY, {'Glaucon': ('stand', 'mid', 'Socrates'), 'Julian': ('stand', 'column', 'mid')})
     S.visible('Julian', 0.0, False)
@@ -151,6 +153,7 @@ def seq3(S):
 
 
 def seq4(S):
+    S.prop('hide', 0.0, who='Julian', on=True)
     S.scene(0.0, 'court', 'NIGHT')
     seat_all(S, 0.0, COMPANY, {'Julian': ('floor', 'column_floor', 'mid')})
     S.visible('Julian', 0.0, False)
@@ -182,6 +185,7 @@ def seq4(S):
 
 
 def seq5(S):
+    S.prop('hide', 0.0, who='Julian', on=True)
     S.scene(0.0, 'court', 'LATER THAT NIGHT')
     seat_all(S, 0.0, LATER, {'Julian': ('floor', 'back_column_floor', 'mid')})
     S.visible('Julian', 0.0, False)
@@ -247,6 +251,7 @@ def seq5(S):
 
 
 def seq6(S):
+    S.prop('hide', 0.0, who='Julian', on=True)
     S.scene(0.0, 'court', 'DEEP NIGHT')
     seat_all(S, 0.0, LATER, {'Julian': ('stand', 'wall_front', 'wall')})
     S.visible('Julian', 0.0, False)
@@ -275,6 +280,10 @@ def seq6(S):
 
 
 def seq7(S):
+    S.prop('hide', 0.0, who='Julian', on=True)
+    _tu = S.t('In the corner, Julian stands up')
+    if _tu is not None:
+        S.prop('hide', _tu - 0.05, who='Julian', on=False)
     S.scene(0.0, 'court', 'BEFORE DAWN')
     seat_all(S, 0.0, DAWN, {'Julian': ('floor', 'corner_floor', 'mid')})
     S.visible('Julian', 0.0, False)

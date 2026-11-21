@@ -22,51 +22,25 @@ def opening(S):
     # ---------------------------------------------------------------- the lounge, at dawn
     S.scene(0.0, 'lounge', 'INDOOR')
     S.place('Julian', 0.0, ('seat', 'julian', 'lounge'))
-    S.place('Aria', 0.0, ('seat', 'aria', 'lounge'))
-    S.place('Cleon', 0.0, ('seat', 'cleon', 'lounge'))
+    S.place('Aria', 0.0, ('away',))      # the opening starts after Aria and Cleon have gone
+    S.place('Cleon', 0.0, ('away',))
     for w in PIRAEUS_PEOPLE + HOUSE + ARRIVE:
         S.place(w, 0.0, ('away',))
     S.prop('ring_on', 0.0, who='Julian', on=False)
-    t = S.t('The holographic screens are dark')
+    t = S.t('Julian picks up the ring')
     if t is not None:
-        S.look('Julian', t, 'socrates_spot', S.t('On the table, exactly there'))
-        S.expr('Julian', t, S.end('The holographic screens are dark'), 'worry', 0.6)
-        S.look('Aria', S.t('The holographic screens are dark', word='ARIA'), 'Julian')
-        S.look('Cleon', S.t('The holographic screens are dark', word='ARIA') + 1.0, 'Julian')
-        S.cam(S.t('The holographic screens are dark', word='JULIAN'), 'close Julian')
-    t = S.t('On the table, exactly there')
-    if t is not None:
-        S.cam(t, 'table')
-        for w in ('Julian', 'Aria', 'Cleon'):
-            S.look(w, t + 0.4, 'ring', S.end('On the table, exactly there', 1.5))
-    t = S.t('He left it behind')
-    if t is not None:
-        S.look('Julian', t + 0.2, 'Cleon', t + 2.0)
-    t = S.t('He never leaves anything behind')
-    if t is not None:
-        S.look('Julian', t + 0.2, 'Aria', S.end('He never leaves anything behind'))
-        S.expr('Aria', t, S.end('He never leaves anything behind'), 'smile', 0.5)
-    t = S.t('Aria and Cleon go')
-    if t is not None:
-        e = S.end('Aria and Cleon go')
-        S.place('Aria', t - 0.05, L('aria_bench', 'door'))
-        S.place('Aria', t + 0.3, L('door', 'door'), 'move')
-        S.place('Cleon', t + 0.2, L('door_in', 'door'), 'move')
-        S.prop('door', t + 1.0, open=True, dur=0.9)
-        S.place('Aria', t + 5.6, ('away',))
-        S.place('Cleon', t + 6.4, ('away',))
-        S.prop('door', t + 6.7, open=False, dur=1.4)
-        S.cam(t, 'door')
-        tp = S.t('Aria and Cleon go', word='Julian picks')
-        S.cam(tp, 'table')
-        S.gesture('point', 'Julian', tp + 0.1, tp + 1.9, target='ring')
-        S.prop('ring_table', tp + 1.2)
-        S.prop('ring_on', tp + 1.25, who='Julian', on=True)
-        ts = S.t('Aria and Cleon go', word='He slips')
+        e = S.end('Julian picks up the ring')
+        S.cam(0.0, 'table')
+        S.look('Julian', 0.0, 'ring', t + 1.6)
+        S.expr('Julian', 0.0, t + 1.0, 'worry', 0.5)
+        S.gesture('point', 'Julian', t + 0.1, t + 1.9, target='ring')
+        S.prop('ring_table', t + 1.2)
+        S.prop('ring_on', t + 1.25, who='Julian', on=True)
+        ts = S.t('Julian picks up the ring', word='He slips')
         S.cam(ts, 'close Julian')
         S.gesture('look_hand', 'Julian', ts, ts + 2.6)
         S.gesture('ring', 'Julian', ts + 2.8, e + 0.6)
-        S.expr('Julian', tp, e + 1.0, 'curious', 0.7)
+        S.expr('Julian', t, e + 1.0, 'curious', 0.7)
     t = S.t('The smell of smog and botanical vapor')
     if t is not None:
         e = S.end('The smell of smog and botanical vapor')
@@ -81,7 +55,7 @@ def opening(S):
     t0 = tp - 0.6
     S.scene(t0, 'piraeus', 'DAY')
     S.place('Julian', t0, P('julian_mid', 0))
-    S.prop('appear', t0 + 0.2, who='Julian', dur=1.0, shadow=True)
+    S.prop('hide', t0, who='Julian', on=True)      # unseen in Athens until he turns the ring outward at dawn
     for w in ('Aria', 'Cleon'):
         S.place(w, t0, ('away',))
     # the procession comes up from the harbour along the far side of the street
@@ -166,9 +140,7 @@ def opening(S):
         S.place('Socrates', t + 0.3, P('soc_stop', 'alley'), 'move')
         S.place('Glaucon', t + 0.5, P('glaucon_stop', 'Socrates'), 'move')
         S.cam(t, 'square')
-        tj = S.t('Across the square', word='Julian starts')
-        S.place('Julian', tj, P('alley_mouth', 'Socrates'), 'move')
-        S.cam(tj, 'alley')
+
     t = S.t('Socrates halts mid-stride')
     if t is not None:
         S.look('Socrates', t + 0.2, 'alley', t + 3.6)

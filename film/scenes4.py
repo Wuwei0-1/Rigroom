@@ -1392,13 +1392,19 @@ PLAN = [
 ]
 
 
+import scenes4b  # noqa: E402
+scenes4b.register(sys.modules[__name__])
+
+
 def windows(items_by_el):
     """Each graphic's place: {id, scene, seq, t0, t1 (seconds in its sequence), beats (seconds from t0)}.
     items_by_el maps element -> (seq, start of its line in the sequence)."""
     res = []
     for gid, scene_, e0, e1, beats in PLAN:
-        if any(e not in items_by_el for e in [e0, e1] + [b[0] for b in beats.values()]):
+        if e0 not in items_by_el:
             continue
+        while e1 > e0 and e1 not in items_by_el:      # a cut line at the end: the graphic ends on the last line kept
+            e1 -= 1
         s0, it0 = items_by_el[e0]
         _, it1 = items_by_el[e1]
         t0 = it0 - 0.3
@@ -1406,6 +1412,9 @@ def windows(items_by_el):
         B = {}
         for name, spec in beats.items():
             e, w = spec[0], spec[1]
+            if e not in items_by_el:          # a beat on a cut line never comes
+                B[name] = 1e9
+                continue
             B[name] = round(items_by_el[e][1] + word_t(e, w, spec[2] if len(spec) > 2 else 1) - t0, 3)
         res.append({'id': gid, 'scene': scene_, 'seq': s0, 'first': e0, 'last': e1, 't0': round(t0, 3), 't1': round(t1, 3), 'beats': B})
     return res

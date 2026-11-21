@@ -82,7 +82,7 @@ for i in range(I0, I1 + 1):
         TRANS.append((t, e['text'], i))
         t += GAP_AFTER.get(e['text'], 0.3)
         continue
-    if e['kind'] not in SPOKEN or e['text'].startswith('From here on, whenever the bezel'):     # a note for the animators, not read
+    if e['kind'] not in SPOKEN or e.get('cut') or e['text'].startswith('From here on, whenever the bezel'):     # cut, or a note for the animators
         continue
     iid = 'e%03d' % i
     who = e['who'] if e['kind'] == 'line' else 'Narrator'
@@ -871,10 +871,19 @@ def station_at(who, time):
     return cur
 
 
+def hidden(who, time):
+    """Whether someone is kept out of sight altogether (S.prop('hide', t, who=, on=True/False))."""
+    state = False
+    for kind, t_, kw in sorted(S.props, key=lambda p: p[1]):
+        if kind == 'hide' and kw.get('who') == who and t_ <= time:
+            state = kw.get('on', True)
+    return state
+
+
 def here(time):
-    """The people in the set being shown at a time."""
+    """The people in the set being shown at a time (not those kept hidden)."""
     set_ = scene_at(time)[1]
-    return [w for w in CH if station_at(w, time)[0] != 'away' and station_set(station_at(w, time)) == set_]
+    return [w for w in CH if station_at(w, time)[0] != 'away' and station_set(station_at(w, time)) == set_ and not hidden(w, time)]
 
 
 # ------------------------------------------------------------------ moves (arm poses blended over time)
@@ -1014,17 +1023,22 @@ def to_arm_space(who, world, time):
     return M.inverted() @ V(world)
 
 
-def g_point(who, t0, t1, target, side='r'):
+def g_point(who, t0, t1, target, side=None):
     c = CH[who]; arm = c['arm']
     in_state(who, t0)
-    sg = 1 if side == 'l' else -1
-    S_ = kit.joint(arm, 'upperarm_' + side)
     if isinstance(target, str) and target not in CH:
         set_ = scene_at(t0)[1]
         tw = V(set_module(set_).LOOKS[target]) + OFFSET[set_]
     else:
         tw = head_at(target, t0) if isinstance(target, str) else V(target)
+    if side is None:      # the hand on the target's side of the body
+        mid = (kit.joint(arm, 'upperarm_l') + kit.joint(arm, 'upperarm_r')) * 0.5
+        side = 'l' if (to_arm_space(who, tw, t0) - mid).x > 0 else 'r'
+    sg = 1 if side == 'l' else -1
+    S_ = kit.joint(arm, 'upperarm_' + side)
     d = to_arm_space(who, tw, t0) - S_
+    if d.y > -0.25 * d.length:          # never reach back behind the body: point forward and out toward it
+        d.y = -0.25 * d.length
     p = S_ + d.normalized() * min(d.length, 0.56)
     dn = (p - S_).normalized()
     A = capture(c, side, lambda: place_hand(arm, side, p, dn, V((0, 0, -1)), S_ + V((sg * 0.6, 0.2, -0.3))), 'point %s' % side)
@@ -1297,6 +1311,10 @@ for who in CH:
 
 def lid_angle(who, f):
     o = LID_OPEN.get(who, -34)
+    t_ = f / FPS
+    for (a_, b_) in SLEEPING.get(who, []):          # no blink while falling asleep or asleep: the lids just droop
+        if a_ - 2.5 <= t_ < b_:
+            return o
     for b in BLINK[who]:
         d = f - b
         if 0 <= d <= 5:
@@ -1350,7 +1368,9 @@ def expr(who, t0, t1, name, k=1.0):
 for who, t0, t1, name, k in S.exprs:
     expr(who, t0, t1, name, k)
 for who, t0, t1 in S.sleeps:
-    expr(who, t0, t1, 'asleep', 1.0)
+    if t0 > 0.5:     # falling asleep on screen: the lids grow heavy first, then close
+        expr(who, t0 - 1.4, t0 + 0.6, 'drowsy', 0.8)
+    expr(who, t0 + (0.5 if t0 > 0.5 else 0.0), t1, 'asleep', 1.0)
 for who, t0, t1, deg in S.leans:
     if who in CH:
         CH[who]['leans'].append((t0, t1, deg))
@@ -1827,6 +1847,17 @@ for who in FX:
         body.visible_shadow = False
         body.keyframe_insert('visible_shadow', frame=F(t1))
 
+# ---- people kept out of sight altogether
+for kind, t_, kw in sorted(S.props, key=lambda p: p[1]):
+    if kind == 'hide' and kw.get('who') in CH:
+        w_ = kw['who']
+        obs = [o for o in bpy.data.objects if o.name.startswith(w_) or o is CH[w_]['body']]
+        for o in obs:
+            o.hide_render = not kw.get('on', True)
+            o.keyframe_insert('hide_render', frame=max(0, F(t_) - 1))
+            o.hide_render = kw.get('on', True)
+            o.keyframe_insert('hide_render', frame=F(t_))
+
 # ---- the ring put on (it lies on the lounge table until he picks it up), and a figure faded out coming back
 for kind, t_, kw in S.props:
     if kind == 'ring_on' and kw.get('who', 'Julian') in RING_MAT:
@@ -2097,6 +2128,15 @@ for it in ITEMS:
             cut(tt + 3.0, shot_of(who, tt + 3.0))
             k += 1
     prev = who
+AIMED = {'column_view': 'Julian', 'wall_julian': 'Julian', 'alley': 'Julian'}     # set cameras framed on one person
+_kept = []
+for (t_, name) in S.cams:
+    # a staged shot of someone kept out of sight is dropped; the automatic cuts cover that moment
+    named = [w for w in CH if w in name] + ([AIMED[name]] if name in AIMED else [])
+    if any(hidden(w, t_ + 0.3) for w in named):
+        continue
+    _kept.append((t_, name))
+S.cams[:] = _kept
 for (t_, name) in S.cams:
     if name.startswith('close '):
         name = close(name[6:], t_ + 0.3)
